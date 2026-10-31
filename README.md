@@ -111,8 +111,7 @@ Related checks: Rule 6(11) unit sale price, Rule 7(2) font height, Rule 8(1) dec
                    ▼                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                         PERSISTENCE & EXPORTS                          │
-│  • SQLite (Local Zero-Config) / PostgreSQL 16 (Enterprise Production)   │
-│  • ReportLab Engine (Tamper-evident Form LM-N1 Legal Notices)          │
+│  • SQLite (Local Zero-Config) / PostgreSQL 16 (Enterprise Production)   ││  • ReportLab Engine (Tamper-evident Form LM-N1 Legal Notices)          │
 │  • python-docx Generator (Standard Court-Ready Case Filings)           │
 └────────────────────────────────────────────────────────────────────────┘
 ```
@@ -137,119 +136,7 @@ product/
 
 ---
 
-## ⚡ Quick Hosting & Live Demo Setup
 
-To attach a live demonstration link to your **PowerPoint (PPT)** or **GitHub Repository**, use one of the two methods below:
-
-### Method 1: Instant Public HTTPS Tunnel (Recommended for Live PPT Demos in 30 Seconds)
-
-You can expose your running application to the internet with a public HTTPS link without needing cloud servers or complex domain setup.
-
-1. **Start the Local Backend & Proxy:**
-   ```powershell
-   # Terminal 1: Backend
-   .\backend\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
-
-   # Terminal 2: Wi-Fi SSL Proxy
-   .\backend\.venv\Scripts\python.exe scripts/wifi_ssl_proxy.py
-   ```
-
-2. **Generate a Free Cloudflare Public HTTPS URL:**
-   ```bash
-   npx -y cloudflared tunnel --url https://localhost:8443
-   ```
-   *Cloudflare immediately prints a live public URL such as:*
-   ```
-   https://demo-legal-lens-xyz.trycloudflare.com
-   ```
-   *👉 Paste this link into your PPT slide. Anyone anywhere can open it instantly on mobile or desktop.*
-
-*(Alternatively, you can use `ngrok http 5000`)*.
-
----
-
-### Method 2: Permanent Free Cloud Deployment (GitHub Pages + Render)
-
-#### A. Frontend (Flutter Web) to GitHub Pages:
-1. Build the release web package:
-   ```bash
-   cd lensescan
-   flutter build web --release --base-href "/LegalLens-AI/"
-   ```
-2. Push the contents of `lensescan/build/web` to your repository's `gh-pages` branch.
-3. In your GitHub repository:
-   * Go to **Settings** > **Pages**
-   * Under **Branch**, select `gh-pages` > `/ (root)` > Click **Save**.
-   * Your frontend is live at: `https://<your-username>.github.io/LegalLens-AI/`
-
-#### B. Frontend (1-Click Drag & Drop) on Vercel / Netlify:
-1. Run `flutter build web --release`.
-2. Go to [app.netlify.com/drop](https://app.netlify.com/drop) or [vercel.com](https://vercel.com).
-3. Drag & drop the `lensescan/build/web` folder.
-4. You get an instant URL like `https://legallens-ai.vercel.app`.
-
-#### C. Backend Deployment to Render.com (Free Tier):
-1. Connect your GitHub repository to [Render.com](https://render.com).
-2. Choose **New Web Service**.
-3. Settings:
-   - **Root Directory:** `backend`
-   - **Environment:** `Python 3`
-   - **Build Command:** `pip install -r requirements.txt`
-   - **Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port 10000`
-4. Update `lensescan/lib/config/app_config.dart` with your Render backend URL.
-
----
-
-## 🛠️ Getting Started (Local Development)
-
-### Prerequisites
-- Python 3.12+
-- Flutter SDK 3.x
-- Git
-
-### 1. Backend Setup
-```powershell
-# Navigate to backend directory
-cd backend
-
-# Create and activate virtual environment
-python -m venv .venv
-.\.venv\Scripts\activate       # On Windows PowerShell
-# source .venv/bin/activate    # On Linux/macOS
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run database seeder (seeds 26 curated dataset products)
-python ..\scripts\seed_presentation_products.py
-
-# Launch development server
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-```
-
-### 2. Frontend Setup (Flutter)
-```powershell
-cd lensescan
-
-# Get Flutter packages
-flutter pub get
-
-# Run static analysis
-flutter analyze
-
-# Launch on Chrome
-flutter run -d chrome
-
-# Or build production web bundle
-flutter build web --release
-```
-
-### 3. Verification Suite
-```powershell
-# Run backend test suite
-.\backend\.venv\Scripts\python.exe -m pytest backend/tests -v
-```
-*Output: 27 passed in ~7s.*
 
 ---
 
@@ -289,8 +176,8 @@ Use these accounts to demonstrate different roles during presentations or evalua
 
 ## 👥 Project Information & Authors
 
-* **Team:** Smart India Hackathon 2026 Finalists
-* **Application Title:** LegalLens AI (formerly LenseScan)
+* **Team:** NextGenCodeX
+* **Application Title:** LegalLens AI 
 * **Governing Body:** Ministry of Consumer Affairs, Food & Public Distribution
 * **Statutory Compliance:** Legal Metrology (Packaged Commodities) Rules, 2011 & Indian Evidence Act, Section 65B
 * **License:** [MIT License](LICENSE)
