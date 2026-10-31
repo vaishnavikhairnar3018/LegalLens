@@ -41,3 +41,12 @@ Thumbs.db
 *.log
 
 product_backup/
+
+# Local-only: photos, papers, slides and stale builds (not code)
+Acro Scanner Photos/
+Research_Paper/
+research_paper_updated/
+*.pptx
+*.zip
+lensescan/web_stale_build_backup/
+.claude/

@@ -1,23 +1,20 @@
-/// Home screen — Executive enforcement overview & quick scan launcher.
+/// Home screen — enforcement overview.
 ///
-/// Provides field officers with a command dashboard:
-/// - Officer greeting & active duty status
-/// - Primary "Start Inspection" action card
-/// - Key metrics (Scans, Compliance Rate, Pending Reviews)
-/// - Recent field inspection history
-/// - LMPC 2011 statutory declaration quick reference
+/// Shows only what the backend returns: inspection totals, daily activity and the most
+/// recent inspections. Loading, error and empty states are explicit; nothing is filled in
+/// with sample data.
 library;
 
 import 'package:dio/dio.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:provider/provider.dart';
 
 import '../config/theme.dart';
 import '../core/api/api_endpoints.dart';
 import '../core/api/dio_client.dart';
-import '../core/auth/auth_provider.dart';
 import '../core/utils/product_formatter.dart';
+import '../widgets/inspection_widgets.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -27,752 +24,489 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  bool _isLoading = true;
-  Map<String, dynamic>? _summary;
-  List<Map<String, dynamic>> _recentInspections = [];
+  static const _trendDays = 14;
+
+  bool _loading = true;
   String? _error;
+  Map<String, dynamic>? _summary;
+  Map<String, dynamic>? _trends;
+  List<Map<String, dynamic>> _recent = [];
 
   @override
   void initState() {
     super.initState();
-    _loadDashboardData();
+    _load();
   }
 
-  Future<void> _loadDashboardData() async {
+  Future<void> _load() async {
     setState(() {
-      _isLoading = true;
+      _loading = true;
       _error = null;
     });
-
     try {
       final dio = DioClient.instance.dio;
-
-      // Fetch summary KPIs and recent inspections in parallel
-      final summaryFuture = dio.get(ApiEndpoints.dashboardSummary);
-      final inspectionsFuture = dio.get('${ApiEndpoints.inspections}?limit=4');
-
       final results = await Future.wait([
-        summaryFuture.catchError((_) => Response(requestOptions: RequestOptions(), statusCode: 500)),
-        inspectionsFuture.catchError((_) => Response(requestOptions: RequestOptions(), statusCode: 500)),
+        dio.get(ApiEndpoints.dashboardSummary),
+        dio.get('${ApiEndpoints.inspections}?limit=6'),
+        dio.get('/dashboard/trends?days=$_trendDays'),
       ]);
-
-      Map<String, dynamic>? summaryData;
-      if (results[0].statusCode == 200 && results[0].data is Map<String, dynamic>) {
-        summaryData = results[0].data as Map<String, dynamic>;
-      }
-
-      List<Map<String, dynamic>> inspectionsList = [];
-      if (results[1].statusCode == 200 && results[1].data is List) {
-        inspectionsList = (results[1].data as List).cast<Map<String, dynamic>>();
-      }
-
-      if (mounted) {
-        setState(() {
-          _summary = summaryData;
-          _recentInspections = inspectionsList;
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = 'Could not load dashboard data: $e';
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  String _formatProductName(String? filename) {
-    return formatProductName(filename, maxLength: 26);
-  }
-
-  String _formatTimestamp(String? iso) {
-    if (iso == null || iso.isEmpty) return '';
-    try {
-      final dt = DateTime.parse(iso).toLocal();
-      final now = DateTime.now();
-      if (dt.year == now.year && dt.month == now.month && dt.day == now.day) {
-        final hour = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
-        final ampm = dt.hour >= 12 ? 'PM' : 'AM';
-        final minute = dt.minute.toString().padLeft(2, '0');
-        return 'Today $hour:$minute $ampm';
-      }
-      return '${dt.day}/${dt.month}/${dt.year}';
-    } catch (_) {
-      return iso;
+      if (!mounted) return;
+      setState(() {
+        _summary = results[0].data as Map<String, dynamic>;
+        _recent = (results[1].data as List).cast<Map<String, dynamic>>();
+        _trends = results[2].data as Map<String, dynamic>;
+        _loading = false;
+      });
+    } on DioException catch (e) {
+      debugPrint('Overview load failed: ${e.type} ${e.response?.statusCode}');
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e.response?.statusCode == 401
+            ? 'Your session expired. Sign in again.'
+            : 'Couldn\'t reach the server.';
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    final username = auth.username;
-    String officerName = 'Enforcement Officer';
-    if (username != null && username.isNotEmpty) {
-      if (username.toLowerCase().startsWith('officer_')) {
-        final clean = username.substring(8);
-        officerName = clean.isNotEmpty
-            ? 'Officer ${clean[0].toUpperCase()}${clean.substring(1)}'
-            : 'Officer';
-      } else if (username.toLowerCase().startsWith('officer')) {
-        final clean = username.substring(7);
-        officerName = clean.isNotEmpty
-            ? 'Officer ${clean[0].toUpperCase()}${clean.substring(1)}'
-            : 'Officer';
-      } else {
-        officerName = 'Officer ${username[0].toUpperCase()}${username.substring(1)}';
-      }
-    }
-    final role = auth.role ?? 'officer';
+    final wide = MediaQuery.of(context).size.width >= 840;
+    final pad = wide ? 32.0 : 16.0;
 
-    return Scaffold(
-      backgroundColor: LenseScanTheme.surface,
-      body: SafeArea(
+    return ColoredBox(
+      color: LL.paper,
+      child: SafeArea(
         child: RefreshIndicator(
-          onRefresh: _loadDashboardData,
-          color: LenseScanTheme.primary,
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // ── Top Bar ──
-                _buildHeader(officerName, role),
-                const SizedBox(height: 20),
-
-                // ── Error Banner (if any) ──
-                if (_error != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: LenseScanTheme.errorContainer,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.error_outline, color: LenseScanTheme.error, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _error!,
-                            style: const TextStyle(fontSize: 12, color: LenseScanTheme.onErrorContainer),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-
-                // ── Hero Scan Card ──
-                _buildHeroScanCard(context),
-                const SizedBox(height: 20),
-
-                // ── KPI Metrics Section ──
-                _buildMetricsSection(),
-                const SizedBox(height: 24),
-
-                // ── Recent Inspections Section ──
-                _buildRecentInspectionsSection(context),
-                const SizedBox(height: 24),
-
-                // ── Statutory LMPC Rules Reference ──
-                _buildRulesReference(),
-                const SizedBox(height: 40),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHeader(String officerName, String role) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: LenseScanTheme.primary,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: LenseScanTheme.primary.withValues(alpha: 0.2),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: const Icon(
-                Icons.security_rounded,
-                color: LenseScanTheme.onPrimary,
-                size: 24,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'LEGALLENS AI',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.2,
-                    color: LenseScanTheme.primary.withValues(alpha: 0.8),
-                  ),
-                ),
-                Text(
-                  officerName,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: LenseScanTheme.onSurface,
-                    letterSpacing: -0.3,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: LenseScanTheme.secondaryFixed.withValues(alpha: 0.35),
-            borderRadius: BorderRadius.circular(9999),
-            border: Border.all(
-              color: LenseScanTheme.secondary.withValues(alpha: 0.3),
-              width: 1,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+          onRefresh: _load,
+          color: LL.accent,
+          child: ListView(
+            padding: EdgeInsets.fromLTRB(pad, wide ? 28 : 16, pad, 32),
             children: [
-              Container(
-                width: 6,
-                height: 6,
-                decoration: const BoxDecoration(
-                  color: LenseScanTheme.secondary,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                role.toUpperCase(),
-                style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: LenseScanTheme.secondary,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildHeroScanCard(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [
-            Color(0xFF0F3B36),
-            Color(0xFF134E4A),
-            Color(0xFF0D332F),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF134E4A).withValues(alpha: 0.35),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () => context.go('/scanner'),
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.qr_code_scanner_rounded, size: 14, color: Colors.white),
-                          SizedBox(width: 6),
-                          Text(
-                            'LIVE SCANNER',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                              letterSpacing: 0.8,
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1180),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _header(wide),
+                      SizedBox(height: wide ? 22 : 16),
+                      if (_loading)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 64),
+                          child: Center(
+                            child: SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: LL.accent),
                             ),
                           ),
-                        ],
-                      ),
-                    ),
-                    const Icon(
-                      Icons.arrow_forward_rounded,
-                      color: Colors.white70,
-                      size: 20,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Start Package Inspection',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                    letterSpacing: -0.4,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Automated LMPC 2011 compliance check with real-time optical scale recovery.',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors.white.withValues(alpha: 0.85),
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () => context.go('/scanner'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: const Color(0xFF0F3B36),
-                          elevation: 0,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-                        icon: const Icon(Icons.camera_alt_rounded, size: 18),
-                        label: const Text(
-                          'Open Camera Viewfinder',
-                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMetricsSection() {
-    final total = _summary?['total_inspections'] ?? _recentInspections.length;
-    final rate = (_summary?['compliance_rate_pct'] as num?)?.toDouble() ??
-        (_calculateLocalRate());
-    final violations = _summary?['non_compliant_count'] ??
-        _recentInspections.where((i) => i['overall_compliant'] == false).length;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Enforcement Overview',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            color: LenseScanTheme.onSurface,
-            letterSpacing: -0.2,
-          ),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            _buildMetricCard(
-              title: 'Total Scans',
-              value: '$total',
-              icon: Icons.inventory_2_outlined,
-              iconColor: LenseScanTheme.primary,
-              bgColor: LenseScanTheme.surfaceContainerLow,
-            ),
-            const SizedBox(width: 10),
-            _buildMetricCard(
-              title: 'Compliance',
-              value: '${rate.toStringAsFixed(0)}%',
-              icon: Icons.verified_rounded,
-              iconColor: LenseScanTheme.secondary,
-              bgColor: const Color(0xFFE8F5E9),
-            ),
-            const SizedBox(width: 10),
-            _buildMetricCard(
-              title: 'Flagged',
-              value: '$violations',
-              icon: Icons.warning_amber_rounded,
-              iconColor: LenseScanTheme.error,
-              bgColor: LenseScanTheme.errorContainer.withValues(alpha: 0.4),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  double _calculateLocalRate() {
-    if (_recentInspections.isEmpty) return 0.0;
-    final compliant = _recentInspections.where((i) => i['overall_compliant'] == true).length;
-    return (compliant / _recentInspections.length) * 100;
-  }
-
-  Widget _buildMetricCard({
-    required String title,
-    required String value,
-    required IconData icon,
-    required Color iconColor,
-    required Color bgColor,
-  }) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-        decoration: BoxDecoration(
-          color: LenseScanTheme.surfaceContainerLowest,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.02),
-              blurRadius: 4,
-              offset: const Offset(0, 1),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 30,
-              height: 30,
-              decoration: BoxDecoration(
-                color: bgColor,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(icon, size: 18, color: iconColor),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.5,
-                color: LenseScanTheme.onSurface,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                color: LenseScanTheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRecentInspectionsSection(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text(
-              'Recent Field Scans',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: LenseScanTheme.onSurface,
-                letterSpacing: -0.2,
-              ),
-            ),
-            TextButton(
-              onPressed: () => context.go('/history'),
-              style: TextButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                foregroundColor: LenseScanTheme.primary,
-              ),
-              child: const Row(
-                children: [
-                  Text('View All', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                  SizedBox(width: 4),
-                  Icon(Icons.arrow_forward_ios_rounded, size: 12),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        if (_isLoading)
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(24.0),
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-          )
-        else if (_recentInspections.isEmpty)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: LenseScanTheme.surfaceContainerLowest,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
-            ),
-            child: Column(
-              children: [
-                Icon(Icons.camera_alt_outlined, size: 40, color: LenseScanTheme.outlineVariant),
-                const SizedBox(height: 10),
-                const Text(
-                  'No inspections recorded yet',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                    color: LenseScanTheme.onSurface,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Captured scans will appear here automatically.',
-                  style: TextStyle(fontSize: 12, color: LenseScanTheme.onSurfaceVariant),
-                ),
-              ],
-            ),
-          )
-        else
-          ..._recentInspections.map((insp) => _buildRecentItemCard(context, insp)),
-      ],
-    );
-  }
-
-  Widget _buildRecentItemCard(BuildContext context, Map<String, dynamic> insp) {
-    final bool isCompliant = insp['overall_compliant'] == true;
-    final bool hasReview = insp['placement_review_required'] == true ||
-        insp['coverage_review_required'] == true ||
-        insp['font_review_required'] == true;
-
-    Color badgeBg;
-    Color badgeColor;
-    String badgeText;
-
-    if (hasReview) {
-      badgeBg = const Color(0xFFFEF3C7);
-      badgeColor = const Color(0xFFB45309);
-      badgeText = 'Review';
-    } else if (isCompliant) {
-      badgeBg = LenseScanTheme.secondaryFixed.withValues(alpha: 0.35);
-      badgeColor = LenseScanTheme.secondary;
-      badgeText = 'Compliant';
-    } else {
-      badgeBg = LenseScanTheme.errorContainer;
-      badgeColor = LenseScanTheme.error;
-      badgeText = 'Violation';
-    }
-
-    final filename = insp['image_filename'] as String? ?? 'Product';
-    final timestamp = insp['created_at'] as String? ?? '';
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: LenseScanTheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () {
-            context.push('/results', extra: insp);
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: LenseScanTheme.surfaceContainer,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(
-                    Icons.qr_code_2_rounded,
-                    size: 20,
-                    color: LenseScanTheme.primary,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _formatProductName(filename),
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: LenseScanTheme.onSurface,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        _formatTimestamp(timestamp),
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: LenseScanTheme.onSurfaceVariant,
-                        ),
-                      ),
+                        )
+                      else if (_error != null)
+                        _message(title: _error!, action: 'Try again', onTap: _load)
+                      else
+                        LayoutBuilder(builder: (context, c) {
+                          final twoUp = c.maxWidth >= 900;
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _statCards(c.maxWidth),
+                              const SizedBox(height: 16),
+                              twoUp
+                                  // Each card takes its own height: forcing equal heights (IntrinsicHeight)
+                                  // measured them too short on a laptop and cut off the chart's date labels
+                                  // and the results legend.
+                                  ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                      Expanded(flex: 3, child: _activityCard()),
+                                      const SizedBox(width: 16),
+                                      Expanded(flex: 2, child: _resultSplitCard()),
+                                    ])
+                                  : Column(children: [_activityCard(), const SizedBox(height: 16), _resultSplitCard()]),
+                              const SizedBox(height: 16),
+                              _recentSection(wide),
+                            ],
+                          );
+                        }),
                     ],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: badgeBg,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    badgeText,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: badgeColor,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                const Icon(
-                  Icons.chevron_right_rounded,
-                  size: 18,
-                  color: Colors.black26,
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _buildRulesReference() {
-    final rules = [
-      'Maximum Retail Price (MRP)',
-      'Net Quantity & Units',
-      'Manufacturer Name & Address',
-      'Month & Year of Manufacture',
-      'Best Before / Expiry Date',
-      'Consumer Care Contact Details',
-      'Country of Origin',
-      'Generic Commodity Name',
-    ];
+  // ── Header ──
+  Widget _header(bool wide) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Text(
+            'Overview',
+            style: TextStyle(fontSize: wide ? 30 : 24, fontWeight: FontWeight.w700, color: LL.text, letterSpacing: -0.6),
+          ),
+        ),
+        FilledButton.icon(
+          onPressed: () => context.go('/scanner'),
+          style: FilledButton.styleFrom(
+            backgroundColor: LL.accent,
+            foregroundColor: LL.onAccent,
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            shape: const StadiumBorder(),
+            textStyle: const TextStyle(fontFamily: LL.font, fontSize: 14, fontWeight: FontWeight.w500),
+          ),
+          icon: const Icon(Icons.document_scanner_outlined, size: 18),
+          label: const Text('Scan a label'),
+        ),
+      ],
+    );
+  }
 
+  // ── Stat cards ──
+  Widget _statCards(double maxWidth) {
+    final total = (_summary?['total_inspections'] as num?)?.toInt() ?? 0;
+    final compliant = (_summary?['compliant_count'] as num?)?.toInt() ?? 0;
+    final notCompliant = (_summary?['non_compliant_count'] as num?)?.toInt() ?? 0;
+    final rate = (_summary?['compliance_rate_pct'] as num?)?.toDouble() ?? 0;
+    final week = (_summary?['week_inspections'] as num?)?.toInt() ?? 0;
+
+    final notPct = total == 0 ? 0 : (100 * notCompliant / total).round();
+
+    // One dark card for the total; the rest stay white and carry colour only in a small dot
+    // that matches the chart series.
+    final cards = [
+      _stat('Inspections', '$total', 'All time', dark: true),
+      _stat('Compliant', '$compliant', '${rate.round()}% of all', dot: LL.violet),
+      _stat('Not compliant', '$notCompliant', '$notPct% of all', dot: LL.accentSoft),
+      _stat('Last 7 days', '$week', 'Inspections', dot: LL.faint),
+    ];
+    final perRow = maxWidth >= 760 ? 4 : 2;
+    final w = (maxWidth - (perRow - 1) * 12) / perRow;
+    return Wrap(spacing: 12, runSpacing: 12, children: [for (final c in cards) SizedBox(width: w, child: c)]);
+  }
+
+  Widget _stat(String label, String value, String note, {bool dark = false, Color? dot}) {
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: LenseScanTheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: LenseScanTheme.primary.withValues(alpha: 0.1)),
-      ),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      decoration: BoxDecoration(color: dark ? LL.accent : LL.surface, borderRadius: BorderRadius.circular(LL.radius)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.gavel_rounded, size: 18, color: LenseScanTheme.primary),
+          Row(children: [
+            if (dot != null) ...[
+              Container(width: 8, height: 8, decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
               const SizedBox(width: 8),
-              Text(
-                'LMPC Rules 2011 — Mandatory Checklist',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: LenseScanTheme.primary,
-                  letterSpacing: -0.1,
-                ),
-              ),
             ],
-          ),
-          const SizedBox(height: 10),
+            Text(label, style: TextStyle(fontSize: 13, color: dark ? LL.sidebarText : LL.muted)),
+          ]),
+          const SizedBox(height: 22),
           Text(
-            'Rule 6 mandates all 8 statutory declarations on the Principal Display Panel (PDP) adhering to Schedule II font height brackets.',
+            value,
             style: TextStyle(
-              fontSize: 11,
-              color: LenseScanTheme.onSurfaceVariant,
-              height: 1.4,
+              fontSize: 30,
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.6,
+              height: 1.1,
+              color: dark ? LL.onAccent : LL.text,
+              fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: rules.map((r) => Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.check_circle, size: 12, color: LenseScanTheme.secondary),
-                  const SizedBox(width: 4),
-                  Text(
-                    r,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: LenseScanTheme.onSurface,
+          const SizedBox(height: 4),
+          Text(note, style: TextStyle(fontSize: 12.5, color: dark ? LL.highlight : LL.faint)),
+        ],
+      ),
+    );
+  }
+
+  // ── Daily activity: compliant vs not compliant per day ──
+  Widget _activityCard() {
+    final dates = (_trends?['dates'] as List? ?? []).cast<String>();
+    final ok = (_trends?['compliant'] as List? ?? []).map((v) => (v as num).toDouble()).toList();
+    final bad = (_trends?['non_compliant'] as List? ?? []).map((v) => (v as num).toDouble()).toList();
+    final hasData = ok.any((v) => v > 0) || bad.any((v) => v > 0);
+    // Bars are stacked (compliant under not compliant), so the axis has to fit each day's total.
+    final peak = [for (var i = 0; i < dates.length; i++) ok[i] + bad[i]].fold<double>(0, (a, b) => a > b ? a : b);
+    // Whole-number grid step with ~4 lines; the top of the axis is a multiple of it so labels never overlap.
+    final step = peak <= 4 ? 1.0 : (peak / 4).ceilToDouble();
+    final maxY = ((peak / step).ceil() + 1) * step;
+
+    return LLCard(
+      title: 'Inspections per day',
+      subtitle: 'Last $_trendDays days',
+      trailing: Wrap(spacing: 12, children: [
+        _legendDot(LL.violet, 'Compliant'),
+        _legendDot(LL.accentSoft, 'Not compliant'),
+      ]),
+      child: SizedBox(
+        height: 262,
+        child: !hasData
+            ? const Center(child: Text('No inspections in this period.', style: TextStyle(fontSize: 13, color: LL.muted)))
+            : BarChart(
+                BarChartData(
+                  minY: 0,
+                  maxY: maxY,
+                  barGroups: [
+                    for (var i = 0; i < dates.length; i++)
+                      BarChartGroupData(x: i, barRods: [
+                        BarChartRodData(
+                          toY: ok[i] + bad[i],
+                          width: 16,
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(6),
+                          rodStackItems: [
+                            BarChartRodStackItem(0, ok[i], LL.violet),
+                            BarChartRodStackItem(ok[i], ok[i] + bad[i], LL.accentSoft),
+                          ],
+                          // Faint full-height track behind every day, so quiet days still read as days.
+                          backDrawRodData: BackgroundBarChartRodData(show: true, toY: maxY, color: const Color(0xFFF9F7F3)),
+                        ),
+                      ]),
+                  ],
+                  gridData: FlGridData(
+                    drawVerticalLine: false,
+                    horizontalInterval: step,
+                    getDrawingHorizontalLine: (_) => const FlLine(color: LL.line, strokeWidth: 1, dashArray: [4, 4]),
+                  ),
+                  borderData: FlBorderData(show: false),
+                  titlesData: FlTitlesData(
+                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 28,
+                        interval: step,
+                        getTitlesWidget: (v, meta) => v % step != 0
+                            ? const SizedBox.shrink()
+                            : SideTitleWidget(axisSide: meta.axisSide, child: Text('${v.toInt()}', style: const TextStyle(fontSize: 11, color: LL.faint))),
+                      ),
                     ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 26,
+                        getTitlesWidget: (v, meta) {
+                          final i = v.toInt();
+                          // Label every 2nd day (every 4th on phones), counted back from today, so labels never collide.
+                          final every = MediaQuery.of(context).size.width < 600 ? 4 : 2;
+                          if ((dates.length - 1 - i) % every != 0) return const SizedBox.shrink();
+                          final d = DateTime.tryParse(dates[i]);
+                          return SideTitleWidget(
+                            axisSide: meta.axisSide,
+                            child: Text(d == null ? '' : shortMonthDay(d), style: const TextStyle(fontSize: 11, color: LL.faint)),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  barTouchData: BarTouchData(
+                    touchTooltipData: BarTouchTooltipData(
+                      getTooltipColor: (_) => LL.accent,
+                      getTooltipItem: (g, gi, rod, ri) => BarTooltipItem(
+                        '${ok[g.x].toInt()} compliant\n${bad[g.x].toInt()} not compliant',
+                        const TextStyle(color: Colors.white, fontSize: 12),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+      ),
+    );
+  }
+
+  // ── Result split (all time) ──
+  Widget _resultSplitCard() {
+    final compliant = (_summary?['compliant_count'] as num?)?.toDouble() ?? 0;
+    final notCompliant = (_summary?['non_compliant_count'] as num?)?.toDouble() ?? 0;
+    final total = compliant + notCompliant;
+    return LLCard(
+      title: 'Results',
+      subtitle: 'All inspections',
+      child: SizedBox(
+        height: 262,
+        child: total == 0
+            ? const Center(child: Text('No inspections yet.', style: TextStyle(fontSize: 13, color: LL.muted)))
+            : Column(
+                children: [
+                  Expanded(
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        PieChart(PieChartData(
+                          centerSpaceRadius: 74,
+                          sectionsSpace: 2,
+                          startDegreeOffset: -90,
+                          sections: [
+                            PieChartSectionData(value: compliant, color: LL.violet, radius: 12, showTitle: false),
+                            PieChartSectionData(value: notCompliant, color: LL.accentSoft, radius: 12, showTitle: false),
+                          ],
+                        )),
+                        Column(mainAxisSize: MainAxisSize.min, children: [
+                          Text('${(100 * compliant / total).round()}%',
+                              style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w600, letterSpacing: -0.6, color: LL.text)),
+                          const Text('compliant', style: TextStyle(fontSize: 12.5, color: LL.muted)),
+                        ]),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    '${compliant.toInt()} of ${total.toInt()} inspections',
+                    style: const TextStyle(fontSize: 12.5, color: LL.muted),
                   ),
                 ],
               ),
-            )).toList(),
-          ),
+      ),
+    );
+  }
+
+  Widget _legendDot(Color c, String label) => Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(width: 9, height: 9, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
+        const SizedBox(width: 6),
+        Text(label, style: const TextStyle(fontSize: 12, color: LL.muted)),
+      ]);
+
+  // ── Recent inspections ──
+  Widget _recentSection(bool wide) {
+    final viewAll = _recent.isEmpty
+        ? null
+        : TextButton(
+            onPressed: () => context.go('/history'),
+            style: TextButton.styleFrom(
+              foregroundColor: LL.text,
+              backgroundColor: LL.hover,
+              shape: const StadiumBorder(),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+            ),
+            child: const Text('View all', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          );
+
+    if (_recent.isEmpty) {
+      return LLCard(
+        title: 'Recent inspections',
+        child: _message(
+          title: 'No inspections yet',
+          body: 'Scanned labels and their results will be listed here.',
+          action: 'Scan a label',
+          onTap: () => context.go('/scanner'),
+          bare: true,
+        ),
+      );
+    }
+
+    return LLCard(
+      title: 'Recent inspections',
+      trailing: viewAll,
+      padding: const EdgeInsets.fromLTRB(22, 22, 22, 12),
+      child: Column(
+        children: [
+          if (wide) _tableHeader(),
+          for (var i = 0; i < _recent.length; i++) ...[
+            if (i > 0 || wide) const Divider(height: 1, thickness: 1, color: LL.line),
+            wide ? _tableRow(_recent[i]) : _listRow(_recent[i]),
+          ],
         ],
       ),
+    );
+  }
+
+  Widget _tableHeader() {
+    const style = TextStyle(fontSize: 12, color: LL.faint);
+    return const Padding(
+      padding: EdgeInsets.fromLTRB(8, 0, 8, 10),
+      child: Row(
+        children: [
+          SizedBox(width: 96, child: Text('ID', style: style)),
+          Expanded(child: Text('Product', style: style)),
+          SizedBox(width: 72, child: Text('Fields', style: style)),
+          SizedBox(width: 110, child: Text('Date', style: style)),
+          SizedBox(width: 96, child: Text('Result', style: style, textAlign: TextAlign.right)),
+        ],
+      ),
+    );
+  }
+
+  Widget _tableRow(Map<String, dynamic> insp) {
+    return InkWell(
+      onTap: () => context.push('/results', extra: insp),
+      hoverColor: LL.hover,
+      borderRadius: BorderRadius.circular(LL.radiusSmall),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+        child: Row(
+          children: [
+            SizedBox(width: 96, child: Text(shortInspectionId(insp), style: LL.mono())),
+            Expanded(
+              child: Text(inspectionDisplayName(insp, maxLength: 48), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: LL.text)),
+            ),
+            SizedBox(
+              width: 72,
+              child: Text(
+                '${insp['compliant_fields'] ?? 0}/${insp['total_fields'] ?? 0}',
+                style: const TextStyle(fontSize: 14, color: LL.muted, fontFeatures: [FontFeature.tabularFigures()]),
+              ),
+            ),
+            SizedBox(width: 110, child: Text(formatInspectionDate(insp['created_at'] as String?), style: const TextStyle(fontSize: 14, color: LL.muted))),
+            SizedBox(width: 96, child: Align(alignment: Alignment.centerRight, child: ResultPill(inspectionResult(insp)))),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _listRow(Map<String, dynamic> insp) {
+    return InkWell(
+      onTap: () => context.push('/results', extra: insp),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(inspectionDisplayName(insp, maxLength: 32), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: LL.text)),
+                  const SizedBox(height: 3),
+                  Text(
+                    '${formatInspectionDate(insp['created_at'] as String?)} · ${insp['compliant_fields'] ?? 0}/${insp['total_fields'] ?? 0} fields',
+                    style: const TextStyle(fontSize: 12, color: LL.muted),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            ResultPill(inspectionResult(insp)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _message({required String title, String? body, required String action, required VoidCallback onTap, bool bare = false}) {
+    final content = Column(
+      children: [
+        Text(title, textAlign: TextAlign.center, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: LL.text)),
+        if (body != null) ...[
+          const SizedBox(height: 6),
+          Text(body, textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: LL.muted)),
+        ],
+        const SizedBox(height: 16),
+        FilledButton(
+          onPressed: onTap,
+          style: FilledButton.styleFrom(backgroundColor: LL.accent, foregroundColor: LL.onAccent, shape: const StadiumBorder()),
+          child: Text(action, style: const TextStyle(fontSize: 13)),
+        ),
+      ],
+    );
+    if (bare) return Padding(padding: const EdgeInsets.symmetric(vertical: 20), child: content);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
+      decoration: LL.card(),
+      child: content,
     );
   }
 }

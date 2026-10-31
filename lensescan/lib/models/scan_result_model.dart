@@ -5,6 +5,7 @@ class ScanResultModel {
   final String scanId;
   final String timestamp;
   final String imageFilename;
+  final String? productName;
   final String? imageHashSha256;
   final int dpiUsed;
   final bool overallCompliant;
@@ -17,11 +18,13 @@ class ScanResultModel {
   final bool coverageReviewRequired;
   final bool fontReviewRequired;
   final double technicalVerificationCoverage;
+  final List<PhotoEvidenceModel> photos;
 
   ScanResultModel({
     required this.scanId,
     required this.timestamp,
     required this.imageFilename,
+    this.productName,
     this.imageHashSha256,
     required this.dpiUsed,
     required this.overallCompliant,
@@ -34,6 +37,7 @@ class ScanResultModel {
     required this.nonCompliantFields,
     required this.declarations,
     required this.summary,
+    this.photos = const [],
   });
 
   factory ScanResultModel.fromJson(Map<String, dynamic> json) {
@@ -47,6 +51,7 @@ class ScanResultModel {
       scanId: json['scan_id'] ?? json['id'] ?? '',
       timestamp: json['timestamp'] ?? json['created_at'] ?? '',
       imageFilename: json['image_filename'] ?? '',
+      productName: json['product_name'],
       imageHashSha256: json['image_hash_sha256'],
       dpiUsed: json['dpi_used'] ?? 300,
       overallCompliant: json['overall_compliant'] ?? false,
@@ -62,8 +67,27 @@ class ScanResultModel {
           .map((d) => DeclarationFieldModel.fromJson(d is Map<String, dynamic> ? d : {}))
           .toList(),
       summary: json['summary'] ?? '',
+      photos: (json['photos'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map(PhotoEvidenceModel.fromJson)
+          .toList(),
     );
   }
+}
+
+/// One photo of a multi-photo product inspection.
+class PhotoEvidenceModel {
+  final String filename;
+  final String sha256;
+  final bool hasMarker;
+
+  PhotoEvidenceModel({required this.filename, required this.sha256, required this.hasMarker});
+
+  factory PhotoEvidenceModel.fromJson(Map<String, dynamic> json) => PhotoEvidenceModel(
+        filename: json['filename'] ?? '',
+        sha256: json['image_hash_sha256'] ?? '',
+        hasMarker: json['pixels_per_mm'] != null,
+      );
 }
 
 class DeclarationFieldModel {
@@ -85,6 +109,9 @@ class DeclarationFieldModel {
   final String? coverageReviewReason;
   final bool fontReviewRequired;
   final String? fontReviewReason;
+  final bool priceReviewRequired;
+  final String? priceReviewReason;
+  final String? note;
 
   DeclarationFieldModel({
     required this.fieldName,
@@ -105,7 +132,20 @@ class DeclarationFieldModel {
     this.coverageReviewReason,
     this.fontReviewRequired = false,
     this.fontReviewReason,
+    this.priceReviewRequired = false,
+    this.priceReviewReason,
+    this.note,
   });
+
+  /// Any flag that means an officer must confirm this declaration by hand.
+  bool get needsReview =>
+      coverageReviewRequired || placementReviewRequired || fontReviewRequired || priceReviewRequired;
+
+  /// The first reason an officer should read: a hard violation, else the review reason.
+  String? get primaryReason {
+    if (violations.isNotEmpty) return violations.first;
+    return fontReviewReason ?? placementReviewReason ?? coverageReviewReason ?? priceReviewReason ?? note;
+  }
 
   factory DeclarationFieldModel.fromJson(Map<String, dynamic> json) {
     return DeclarationFieldModel(
@@ -134,6 +174,9 @@ class DeclarationFieldModel {
       coverageReviewReason: json['coverage_review_reason'],
       fontReviewRequired: json['font_review_required'] ?? false,
       fontReviewReason: json['font_review_reason'],
+      priceReviewRequired: json['price_review_required'] ?? false,
+      priceReviewReason: json['price_review_reason'],
+      note: json['note'],
     );
   }
 }

@@ -76,7 +76,7 @@ AUDITED_METADATA = {
         "packaging_type": "Pillow Pouch",
         "panel_type": "Front (PDP)",
         "ground_truth_status": "VIOLATION",
-        "statutory_citations": "Rule 6(1)(a)",
+        "statutory_citations": "Rule 6(1)(c)",
         "violation_details": "Net Quantity omitted on Principal Display Panel",
         "declared_mrp": "₹5.00",
         "declared_net_qty": "",
@@ -190,8 +190,8 @@ AUDITED_METADATA = {
         "packaging_type": "Pillow Pouch",
         "panel_type": "Back Panel",
         "ground_truth_status": "VIOLATION",
-        "statutory_citations": "Schedule II",
-        "violation_details": "Font height non-compliance under Schedule II relative to PDP",
+        "statutory_citations": "Rule 7(2)",
+        "violation_details": "Font height non-compliance under Rule 7(2) relative to PDP",
         "declared_mrp": "₹55.00",
         "declared_net_qty": "200g",
         "declared_usp": "₹0.28/g",
@@ -256,7 +256,7 @@ AUDITED_METADATA = {
         "packaging_type": "Flexible Pouch",
         "panel_type": "Batch Coder Window",
         "ground_truth_status": "VIOLATION",
-        "statutory_citations": "Rule 6(1)(a), Rule 12",
+        "statutory_citations": "Rule 6(1)(c), Rule 12",
         "violation_details": "Critical Defect: Net Quantity numerical value and unit omitted during batch coding",
         "declared_mrp": "₹20.00",
         "declared_net_qty": "",
@@ -289,8 +289,8 @@ AUDITED_METADATA = {
         "packaging_type": "Polyethylene Bag",
         "panel_type": "Back Panel",
         "ground_truth_status": "VIOLATION",
-        "statutory_citations": "Schedule II",
-        "violation_details": "Font height violation under Schedule II",
+        "statutory_citations": "Rule 7(2)",
+        "violation_details": "Font height violation under Rule 7(2)",
         "declared_mrp": "₹45.00",
         "declared_net_qty": "500g",
         "declared_usp": "₹0.09/g",
@@ -322,7 +322,7 @@ AUDITED_METADATA = {
         "packaging_type": "Laminated Pouch",
         "panel_type": "Back Panel",
         "ground_truth_status": "VIOLATION",
-        "statutory_citations": "Schedule II",
+        "statutory_citations": "Rule 7(2)",
         "violation_details": "Font size infraction on mandatory manufacturer declaration",
         "declared_mrp": "₹15.00",
         "declared_net_qty": "21g",
@@ -372,7 +372,7 @@ AUDITED_METADATA = {
         "packaging_type": "Curved Canister",
         "panel_type": "Cylindrical Front",
         "ground_truth_status": "REVIEW",
-        "statutory_citations": "Rule 6(2)",
+        "statutory_citations": "Rule 8(1)",
         "violation_details": "Geometry Review: Curvature causes optical character distortion",
         "declared_mrp": "₹140.00",
         "declared_net_qty": "300g",
@@ -388,7 +388,7 @@ AUDITED_METADATA = {
         "packaging_type": "Curved Canister",
         "panel_type": "Cylindrical Side",
         "ground_truth_status": "REVIEW",
-        "statutory_citations": "Rule 6(2)",
+        "statutory_citations": "Rule 8(1)",
         "violation_details": "Geometry Review: Severe cylindrical perspective skew",
         "declared_mrp": "₹140.00",
         "declared_net_qty": "300g",
@@ -405,7 +405,7 @@ AUDITED_METADATA = {
         "packaging_type": "Carton Box",
         "panel_type": "Top Flap",
         "ground_truth_status": "VIOLATION",
-        "statutory_citations": "Rule 6(2)",
+        "statutory_citations": "Rule 8(1)",
         "violation_details": "Placement Violation: Mandatory declarations fragmented across box folds",
         "declared_mrp": "₹142.00",
         "declared_net_qty": "450g",
@@ -454,7 +454,7 @@ AUDITED_METADATA = {
         "packaging_type": "Poly Pouch",
         "panel_type": "Front (PDP)",
         "ground_truth_status": "VIOLATION",
-        "statutory_citations": "Rule 6(1)(da)",
+        "statutory_citations": "Rule 6(2)",
         "violation_details": "Consumer Care contact details absent",
         "declared_mrp": "₹60.00",
         "declared_net_qty": "1kg",
@@ -486,7 +486,7 @@ AUDITED_METADATA = {
         "packaging_type": "Stand-up Pouch",
         "panel_type": "Angled Side",
         "ground_truth_status": "REVIEW",
-        "statutory_citations": "Rule 6(2)",
+        "statutory_citations": "Rule 8(1)",
         "violation_details": "Geometry Review: Extreme camera angle (>35 deg)",
         "declared_mrp": "₹20.00",
         "declared_net_qty": "200ml",
@@ -502,7 +502,7 @@ AUDITED_METADATA = {
         "packaging_type": "Pillow Pouch",
         "panel_type": "Seam Edge",
         "ground_truth_status": "VIOLATION",
-        "statutory_citations": "Rule 6(2)",
+        "statutory_citations": "Rule 8(1)",
         "violation_details": "Placement Violation: Mandatory text split across heat-seal crimp",
         "declared_mrp": "₹10.00",
         "declared_net_qty": "45g",
@@ -725,16 +725,16 @@ def determine_status_and_citations(filename: str) -> tuple:
         if "missing_mrp" in fn:
             return "VIOLATION", "Rule 6(1)(e)", "Absence of declared Maximum Retail Price (MRP)"
         elif "missing_netqty" in fn:
-            return "VIOLATION", "Rule 6(1)(a), Rule 12", "Critical Defect: Net Quantity omitted from batch coder"
+            return "VIOLATION", "Rule 6(1)(c), Rule 12", "Critical Defect: Net Quantity omitted from batch coder"
         elif "font_violation" in fn:
-            return "VIOLATION", "Schedule II", "Mandatory font height below statutory minimum"
+            return "VIOLATION", "Rule 7(2)", "Mandatory font height below statutory minimum"
         elif "missing_consumer" in fn:
-            return "VIOLATION", "Rule 6(1)(da)", "Absence of consumer grievance contact coordinates"
+            return "VIOLATION", "Rule 6(2)", "Absence of consumer grievance contact coordinates"
         elif "placement_violation" in fn:
-            return "VIOLATION", "Rule 6(2)", "Mandatory declaration printed across folded/crimped seams"
+            return "VIOLATION", "Rule 8(1)", "Mandatory declaration printed across folded/crimped seams"
         return "VIOLATION", "Rule 6", "Packaging defect identified"
     elif "review" in fn or "curved" in fn or "angled" in fn:
-        return "REVIEW", "Rule 6(2)", "Fail-safe geometry review triggered by perspective/curvature"
+        return "REVIEW", "Rule 8(1)", "Fail-safe geometry review triggered by perspective/curvature"
     else:
         return "COMPLIANT", "None", "Fully compliant statutory packaging declaration"
 
@@ -784,15 +784,15 @@ Every image is cryptographically stamped with a **SHA-256 hash** upon capture, f
 
 1. **Rule 6(1)(e) — Absence of Maximum Retail Price (MRP):**
    - Packaged goods missing conspicuous, tax-inclusive MRP declarations.
-2. **Rule 6(1)(a) & Rule 12 — Omission of Net Quantity:**
+2. **Rule 6(1)(c) & Rule 12 — Omission of Net Quantity:**
    - Real industrial defect where net quantity numerical value/unit was blanked during batch laser/inkjet coding.
-3. **Schedule II — Minimum Font Size Non-Compliance:**
+3. **Rule 7(2) — Minimum Font Size Non-Compliance:**
    - Mandatory declaration font heights rendered below statutory limits relative to Principal Display Panel area.
 4. **Rule 6(1)(d) — Date of Manufacture / Packing / Expiry:**
    - Absence of manufacturing date or month/year stamp.
-5. **Rule 6(1)(da) — Consumer Grievance Coordinates:**
+5. **Rule 6(2) — Consumer Grievance Coordinates:**
    - Omission of telephone, email, or postal grievance redressal addresses.
-6. **Rule 6(2) — Crimp Seam / Placement Non-Compliance:**
+6. **Rule 8(1) — Crimp Seam / Placement Non-Compliance:**
    - Mandatory text stamped across heat seals, folds, or distorted along cylindrical canister radiuses.
 
 ---
@@ -809,7 +809,7 @@ Every image is cryptographically stamped with a **SHA-256 hash** upon capture, f
 | `packaging_type` | String | Packaging form factor (Pillow Pouch, Spout Pouch, Box, Canister, Bottle) |
 | `panel_type` | String | Specific packaging face photographed |
 | `ground_truth_status` | Enum | `COMPLIANT`, `VIOLATION`, `REVIEW` |
-| `statutory_citations` | String | Legal Metrology Rule citation (e.g., Rule 6(1)(e), Schedule II) |
+| `statutory_citations` | String | Legal Metrology Rule citation (e.g., Rule 6(1)(e), Rule 7(2)) |
 | `violation_details` | String | Description of statutory defect |
 | `declared_mrp` | String | Extracted/labeled MRP value |
 | `declared_net_qty` | String | Extracted/labeled Net Quantity |

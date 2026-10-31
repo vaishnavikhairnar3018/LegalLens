@@ -22,7 +22,7 @@ FIELD_PATTERNS: Dict[str, List[re.Pattern]] = {
     "mrp": [
         re.compile(
             r"(?:M\.?\s*R\.?\s*P\.?|Maximum\s*Retail\s*Price|Retail\s*Price)"
-            r"\s*[:\-?]?\s*(?:[₹\?]|Rs\.?|INR)?\s*[\d,]+(?:\.\d{1,2})?(?:\s*(?:incl\.?|inclusive|all\s*taxes|\([^)]*taxes[^)]*\)))?",
+            r"\s*[:\-?]?\s*(?:[₹\?]|Rs\.?|INR)?\s*[:\-]?\s*[\d,]+(?:\.\d{1,2})?(?:\s*(?:incl\.?|inclusive|all\s*taxes|\([^)]*taxes[^)]*\)))?",
             re.IGNORECASE,
         ),
         re.compile(r"[₹]\s*[\d,]+(?:\.\d{1,2})?", re.IGNORECASE),
@@ -46,12 +46,12 @@ FIELD_PATTERNS: Dict[str, List[re.Pattern]] = {
         re.compile(
             r"(?:Mf[gd]\.?|Manu?f(?:actur(?:ed|ing))?|Pack(?:ed|ing)?|PKD\.?|Dom|Date\s*of\s*(?:Manufacture|Mfg|Packing))"
             r"\s*(?:Date|On|Dt\.?)?\s*[:\-]?\s*"
-            r"(?:\d{1,2}[\s/\-\.]\d{1,2}[\s/\-\.]\d{2,4}|\w+[\s/\-\.]\d{2,4}|\d{2,4})",
+            r"(?:\d{1,2}[\s/\-\.]*[A-Za-z]{3,9}[\s/\-\.,]*\d{2,4}|\d{1,2}[\s/\-\.]\d{1,2}[\s/\-\.]\d{2,4}|\w+[\s/\-\.]\d{2,4}|\d{2,4})",
             re.IGNORECASE,
         ),
         re.compile(
             r"(?:Date\s*of\s*(?:Manufacture|Mfg|Packing))\s*[:\-]?\s*"
-            r"(?:\d{1,2}[\s/\-\.]\d{1,2}[\s/\-\.]\d{2,4}|\w+[\s/\-\.]\d{2,4})",
+            r"(?:\d{1,2}[\s/\-\.]*[A-Za-z]{3,9}[\s/\-\.,]*\d{2,4}|\d{1,2}[\s/\-\.]\d{1,2}[\s/\-\.]\d{2,4}|\w+[\s/\-\.]\d{2,4})",
             re.IGNORECASE,
         ),
     ],
@@ -76,9 +76,12 @@ FIELD_PATTERNS: Dict[str, List[re.Pattern]] = {
         ),
     ],
     "consumer_care": [
+        # OCR often reads 'CONSUMER' as 'CONSVMER' and cuts 'CUSTOMER' to 'STOMER' on crimped pouches;
+        # a 'CARE NO:' followed by a number is the same declaration.
         re.compile(
-            r"(?:[CLO]onsumer|Customer)\s*(?:Care|Service|Helpline|Grievance|Support|"
-            r"Executive|Cell|Complaint|Contact)",
+            r"(?:[CLO][o0]ns[uv]mer|Cus?tomer|\bstomer)\s*(?:Care|Service|Helpline|Grievance|Support|"
+            r"Executive|Cell|Complaint|Contact)"
+            r"|\bCare\s*(?:No|Number)\b\.?\s*[:\-]?\s*\+?\d",
             re.IGNORECASE,
         ),
         re.compile(
@@ -108,12 +111,82 @@ FIELD_PATTERNS: Dict[str, List[re.Pattern]] = {
             re.IGNORECASE,
         ),
     ],
+    "unit_sale_price": [
+        re.compile(
+            r"(?:U\.?\s*S\.?\s*P\.?|Unit\s*Sale\s*Price)\s*[:\-?]?\s*(?:[₹\?]|Rs\.?|INR)?\s*[\d,]+(?:\.\d{1,2})?\s*(?:/|per)\s*(?:[\d.]*\s*(?:g|gm|kg|ml|mL|l|L|nos?|pcs?|piece))\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"(?:[₹]|Rs\.?)\s*[\d,]+(?:\.\d{1,2})?\s*(?:/|per)\s*(?:[\d.]*\s*(?:g|gm|kg|ml|mL|l|L|nos?|pcs?))\b",
+            re.IGNORECASE,
+        ),
+    ],
 }
 
 # Additional patterns for extracting specific values
 ADDRESS_PIN_PATTERN = re.compile(r"\b\d{6}\b")  # Indian PIN code
-PHONE_PATTERN = re.compile(r"(?:\+91[\-\s]?)?(?:[6-9]\d{9}|1800[\-\s]?\d{3,4}[\-\s]?\d{3,4}|\d{10,11})")
+PHONE_PATTERN = re.compile(
+    r"(?:\+91[\-\s]?)?(?:[6-9]\d{9}|1800[\-\s]?\d{3,4}[\-\s]?\d{3,4}|\d{10,11}|0\d{2,4}[\-\s]\d{6,8})"
+)
 EMAIL_PATTERN = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
+
+# Letter O read in place of the digit 0 inside a quantity ('10Og' printed as 100g).
+_O_AS_ZERO = re.compile(r"(?<=\d)[Oo](?=\d|\s?(?:g|kg|mg|ml|mL|l|L)\b)")
+
+# Dates are often in their own OCR box beside the label ('Pkd Date' | '31 MAR 26'). Those two
+# fields are matched box by box and, failing that, by pairing a label box with a neighbouring
+# date box. They are never matched on the joined text of the whole photo, which can glue a
+# label to a date printed somewhere else on the pack.
+_MONTH = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*"
+DATE_VALUE = re.compile(
+    rf"\b(?:\d{{1,2}}[\s/\-.]*{_MONTH}[\s/\-.,]*\d{{2,4}}|{_MONTH}[\s/\-.]*\d{{2,4}}|\d{{1,2}}[/\-.]\d{{2,4}}(?:[/\-.]\d{{2,4}})?)\b",
+    re.IGNORECASE,
+)
+DATE_LABELS = {
+    "manufacturing_date": re.compile(
+        r"\b(?:pkd|pkg|mfd|mfg|packed\s*on|packing\s*date|manufactured\s*on|"
+        r"date\s*of\s*(?:packing|manufacture|mfg|mfd|pkg))\b",
+        re.IGNORECASE,
+    ),
+    "best_before": re.compile(r"\b(?:best\s*before|use\s*by|expiry|exp\.?\s*date)\b", re.IGNORECASE),
+}
+
+
+def _box_extent(r: OCRResult) -> Tuple[float, float, float, float]:
+    b = r.bbox
+    xs = [b.top_left[0], b.top_right[0], b.bottom_right[0], b.bottom_left[0]]
+    ys = [b.top_left[1], b.top_right[1], b.bottom_right[1], b.bottom_left[1]]
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+def _pair_label_with_date(field_name: str, ocr_results: List[OCRResult]) -> Optional[Tuple[OCRResult, OCRResult]]:
+    """
+    Find a label box ('Pkd Date', 'use By:') and the date box right next to it: on the same line
+    (vertical overlap, starting at most 6 label-heights to the right) or directly below/above
+    (within 1.5 label-heights, overlapping horizontally). The closest candidate wins.
+    """
+    label_pattern = DATE_LABELS[field_name]
+    best, best_dist = None, float("inf")
+    for label in ocr_results:
+        if not label_pattern.search(label.text) or DATE_VALUE.search(label.text):
+            continue
+        lx0, lx1, ly0, ly1 = _box_extent(label)
+        lh = max(ly1 - ly0, 1.0)
+        for date in ocr_results:
+            if date is label or not DATE_VALUE.search(date.text):
+                continue
+            dx0, dx1, dy0, dy1 = _box_extent(date)
+            dh = max(dy1 - dy0, 1.0)
+            v_overlap = min(ly1, dy1) - max(ly0, dy0)
+            h_overlap = min(lx1, dx1) - max(lx0, dx0)
+            same_line = v_overlap >= 0.3 * min(lh, dh) and -0.5 * lh <= dx0 - lx1 <= 6 * lh
+            stacked = h_overlap > 0 and (0 <= dy0 - ly1 <= 1.5 * lh or 0 <= ly0 - dy1 <= 1.5 * lh)
+            if not (same_line or stacked):
+                continue
+            dist = abs((dx0 + dx1) / 2 - (lx0 + lx1) / 2) + abs((dy0 + dy1) / 2 - (ly0 + ly1) / 2)
+            if dist < best_dist:
+                best, best_dist = (label, date), dist
+    return best
 
 
 def classify_declarations(
@@ -134,16 +207,21 @@ def classify_declarations(
     Returns:
         Dictionary mapping field names to detection results.
     """
+    ocr_results = [
+        r.model_copy(update={"text": _O_AS_ZERO.sub("0", r.text)}) if _O_AS_ZERO.search(r.text) else r
+        for r in ocr_results
+    ]
     full_text = " ".join(r.text for r in ocr_results)
     declarations: Dict[str, Dict] = {}
 
     for field_name, patterns in FIELD_PATTERNS.items():
         matched_entries: List[OCRResult] = []
         matched_values: List[str] = []
+        boxes_only = field_name in DATE_LABELS
 
         # 1. Primary priority: check primary pattern on full_text and individual boxes
         primary_pattern = patterns[0]
-        full_match = primary_pattern.search(full_text)
+        full_match = None if boxes_only else primary_pattern.search(full_text)
         if full_match:
             matched_values.append(full_match.group(0).strip())
             _find_closest_entry(full_match.group(0), ocr_results, matched_entries)
@@ -157,7 +235,7 @@ def classify_declarations(
         # 2. Secondary fallback: only if primary pattern matched nothing
         if not matched_values and len(patterns) > 1:
             for pattern in patterns[1:]:
-                full_m = pattern.search(full_text)
+                full_m = None if boxes_only else pattern.search(full_text)
                 if full_m:
                     matched_values.append(full_m.group(0).strip())
                     _find_closest_entry(full_m.group(0), ocr_results, matched_entries)
@@ -170,6 +248,13 @@ def classify_declarations(
                         break
                 if matched_values:
                     break
+
+        # 3. Date fields: a label box paired with the date box beside it
+        if not matched_values and boxes_only:
+            pair = _pair_label_with_date(field_name, ocr_results)
+            if pair:
+                matched_entries.extend(pair)
+                matched_values.append(f"{pair[0].text.strip()} {pair[1].text.strip()}")
 
         detected = len(matched_values) > 0
         max_font_height_mm = None

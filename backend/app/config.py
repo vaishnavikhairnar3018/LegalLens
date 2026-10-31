@@ -56,6 +56,11 @@ class Settings(BaseSettings):
         """Convert MB limit to bytes."""
         return self.MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
+    @property
+    def max_request_size_bytes(self) -> int:
+        """Whole request: up to 8 photos at the per-photo limit, plus 1 MB for the other form fields."""
+        return (8 * self.MAX_UPLOAD_SIZE_MB + 1) * 1024 * 1024
+
 
 @lru_cache()
 def get_settings() -> Settings:

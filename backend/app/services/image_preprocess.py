@@ -8,6 +8,25 @@ import numpy as np
 from typing import Tuple
 
 
+def normalize_upload(image_bytes: bytes, max_dimension: int = 2048) -> bytes:
+    """
+    Shrink an uploaded photo once, on the server, to at most max_dimension pixels (INTER_AREA,
+    which keeps small print sharp), and return it as lossless PNG bytes.
+
+    Calibration and OCR must both work on these bytes. If the marker were measured on the full
+    photo while OCR read a shrunken copy, px/mm and the letter boxes would be on different pixel
+    grids and every letter height in mm would be wrong. Hash the raw upload, never this output.
+    """
+    image = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError("Failed to decode image. File may be corrupted.")
+    image = _resize_if_needed(image, max_dimension=max_dimension)
+    ok, buf = cv2.imencode(".png", image, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+    if not ok:
+        raise ValueError("Failed to re-encode image after resizing.")
+    return buf.tobytes()
+
+
 def preprocess_image(image_bytes: bytes) -> np.ndarray:
     """
     Full preprocessing pipeline for label images.

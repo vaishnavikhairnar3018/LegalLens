@@ -31,6 +31,8 @@ class Inspection(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     officer_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     image_filename = Column(String(255), nullable=False)
+    # Product name as entered by the inspecting officer (null for older records)
+    product_name = Column(String(200), nullable=True)
     image_hash_sha256 = Column(String(64), nullable=False, index=True)
     
     overall_compliant = Column(Boolean, nullable=False, index=True)
@@ -54,7 +56,11 @@ class Inspection(Base):
     relative_prominence_json = Column(Text, nullable=True)
     cross_panel_mismatches_json = Column(Text, nullable=True)
     technical_verification_coverage = Column(Float, nullable=True)
-    
+    # Multi-photo product inspections: JSON list of {filename, image_hash_sha256,
+    # calibration_method, pixels_per_mm}, one entry per photo, hashed on raw bytes.
+    # Null for single-photo inspections (image_filename / image_hash_sha256 cover those).
+    evidence_json = Column(Text, nullable=True)
+
     created_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

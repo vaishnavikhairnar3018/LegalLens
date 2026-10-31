@@ -1,11 +1,9 @@
-/// Results screen — compliance report with donut chart and declaration checklist.
+/// Results screen — the inspection slip for one scan.
 ///
-/// Matches Stitch design: 5._compliance_results_report/code.html
-/// Product name header, compliance score, donut chart, declaration rows,
-/// bottom sticky export buttons. SHA-256 badge kept as collapsible.
+/// Product, date and a result stamp at the top, then every declaration with
+/// its status and the reason an officer needs to read, then the evidence hash
+/// and the notice downloads.
 library;
-
-import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -18,9 +16,7 @@ import '../core/api/dio_client.dart';
 import '../core/utils/file_downloader.dart';
 import '../core/utils/product_formatter.dart';
 import '../models/scan_result_model.dart';
-import '../widgets/compliance_card.dart';
 
-/// Compliance report display screen.
 class ResultsScreen extends StatefulWidget {
   final Map<String, dynamic> report;
 
@@ -30,769 +26,456 @@ class ResultsScreen extends StatefulWidget {
   State<ResultsScreen> createState() => _ResultsScreenState();
 }
 
+enum _Status { pass, violation, review }
+
 class _ResultsScreenState extends State<ResultsScreen> {
   late ScanResultModel _result;
-  bool _isLoadingFullReport = false;
-  bool _isDownloadingPdf = false;
-  bool _isDownloadingDocx = false;
-  String? _fetchError;
-  bool _showHashDetail = false;
+  bool _loadingDetail = false;
+  String? _detailError;
+  bool _downloadingPdf = false;
+  bool _downloadingDocx = false;
 
   @override
   void initState() {
     super.initState();
     _result = ScanResultModel.fromJson(widget.report);
-    // If opened from history list, declarations list might be empty. Fetch full record.
+    // Rows opened from History carry only the summary; fetch the declarations.
     if (_result.declarations.isEmpty && _result.scanId.isNotEmpty) {
-      _loadFullInspection();
+      _loadDetail();
     }
   }
 
-  Future<void> _loadFullInspection() async {
+  Future<void> _loadDetail() async {
     setState(() {
-      _isLoadingFullReport = true;
-      _fetchError = null;
+      _loadingDetail = true;
+      _detailError = null;
     });
-
     try {
-      final response = await DioClient.instance.dio.get(
-        ApiEndpoints.inspectionDetail(_result.scanId),
-      );
-      if (response.data is Map<String, dynamic>) {
-        setState(() {
-          _result = ScanResultModel.fromJson(response.data as Map<String, dynamic>);
-          _isLoadingFullReport = false;
-        });
-      }
-    } catch (e) {
+      final response = await DioClient.instance.dio.get(ApiEndpoints.inspectionDetail(_result.scanId));
+      if (!mounted) return;
       setState(() {
-        _isLoadingFullReport = false;
-        _fetchError = 'Could not load full declaration details: $e';
+        _result = ScanResultModel.fromJson(response.data as Map<String, dynamic>);
+        _loadingDetail = false;
+      });
+    } on DioException catch (e) {
+      debugPrint('Inspection detail failed: ${e.type} ${e.response?.statusCode}');
+      if (!mounted) return;
+      setState(() {
+        _loadingDetail = false;
+        _detailError = 'Couldn\'t load the declarations for this inspection.';
       });
     }
   }
 
-  Future<void> _downloadExport({required bool isDocx}) async {
-    if (_result.scanId.isEmpty) {
-      _showToast('Cannot export: No Inspection ID found');
-      return;
-    }
-
-    setState(() {
-      if (isDocx) {
-        _isDownloadingDocx = true;
-      } else {
-        _isDownloadingPdf = true;
-      }
-    });
-
-    final endpoint = isDocx
-        ? ApiEndpoints.inspectionDocx(_result.scanId)
-        : ApiEndpoints.inspectionPdf(_result.scanId);
-
+  Future<void> _download({required bool docx}) async {
+    if (_result.scanId.isEmpty) return;
+    setState(() => docx ? _downloadingDocx = true : _downloadingPdf = true);
+    final ext = docx ? 'docx' : 'pdf';
+    final mime = docx
+        ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        : 'application/pdf';
     try {
       final response = await DioClient.instance.dio.get<List<int>>(
-        endpoint,
-        options: Options(
-          responseType: ResponseType.bytes,
-          headers: {'Accept': isDocx ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/pdf'},
-        ),
+        docx ? ApiEndpoints.inspectionDocx(_result.scanId) : ApiEndpoints.inspectionPdf(_result.scanId),
+        options: Options(responseType: ResponseType.bytes, headers: {'Accept': mime}),
       );
-
       final bytes = response.data;
-      final byteCount = bytes?.length ?? 0;
-      final typeStr = isDocx ? 'DOCX' : 'PDF';
-      final ext = isDocx ? 'docx' : 'pdf';
-      final mimeType = isDocx
-          ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-          : 'application/pdf';
-      final scanSubId = _result.scanId.length > 8 ? _result.scanId.substring(0, 8) : _result.scanId;
-      final filename = 'LMPC_${scanSubId}_$typeStr.$ext';
-
-      if (bytes != null && bytes.isNotEmpty) {
-        downloadFile(bytes, filename, mimeType);
-      }
-
-      if (mounted) {
-        _showToast('$typeStr generated (${(byteCount / 1024).toStringAsFixed(1)} KB)');
+      if (bytes == null || bytes.isEmpty) {
+        _toast('The server returned an empty file.');
+      } else {
+        downloadFile(bytes, '${_documentName.replaceAll(' ', '_')}_$_shortId.$ext', mime);
+        _toast('${docx ? 'Word' : 'PDF'} file downloaded');
       }
     } on DioException catch (e) {
-      final msg = e.response?.data is Map
-          ? (e.response?.data['detail'] ?? 'Export failed')
-          : 'Export request failed';
-      if (mounted) _showToast('Export Error: $msg');
-    } catch (e) {
-      if (mounted) _showToast('Download failed: $e');
+      final detail = e.response?.data is Map ? (e.response!.data as Map)['detail'] : null;
+      _toast(detail is String ? detail : 'Couldn\'t download the file. Try again.');
     } finally {
-      if (mounted) {
-        setState(() {
-          if (isDocx) {
-            _isDownloadingDocx = false;
-          } else {
-            _isDownloadingPdf = false;
-          }
-        });
-      }
+      if (mounted) setState(() => docx ? _downloadingDocx = false : _downloadingPdf = false);
     }
   }
 
-  void _showToast(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 3),
-      ),
-    );
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), duration: const Duration(seconds: 3)));
   }
 
-  void _copyHashToClipboard(String hash) {
-    Clipboard.setData(ClipboardData(text: hash));
-    _showToast('SHA-256 hash copied');
+  // ── Derived state ──
+  String get _shortId => _result.scanId.length > 8 ? _result.scanId.substring(0, 8) : _result.scanId;
+
+  _Status _statusOf(DeclarationFieldModel d) {
+    if (!d.compliant) return _Status.violation;
+    if (d.needsReview) return _Status.review;
+    return _Status.pass;
   }
 
-  // Compute counts for donut chart
-  int get _reviewCount => _result.declarations.where((d) =>
-      d.coverageReviewRequired || d.placementReviewRequired || d.fontReviewRequired).length;
-  int get _compliantCount => _result.declarations.where((d) =>
-      d.compliant && !d.coverageReviewRequired && !d.placementReviewRequired && !d.fontReviewRequired).length;
-  int get _violationCount => _result.declarations.where((d) =>
-      !d.compliant && !d.coverageReviewRequired && !d.placementReviewRequired && !d.fontReviewRequired).length;
-  bool get _hasReviewItems =>
-      _result.placementReviewRequired ||
-      _result.coverageReviewRequired ||
-      _result.fontReviewRequired ||
-      _reviewCount > 0;
-
-  String get _compliancePercent {
-    if (_result.totalFields == 0) return '0%';
-    final pct = (_compliantCount / _result.totalFields * 100).toStringAsFixed(1);
-    return '$pct%';
+  _Status get _overall {
+    final decls = _result.declarations;
+    if (decls.isEmpty) {
+      if (_result.overallCompliant) return _Status.pass;
+      return _result.nonCompliantFields > 0 ? _Status.violation : _Status.review;
+    }
+    if (decls.any((d) => _statusOf(d) == _Status.violation)) return _Status.violation;
+    if (decls.any((d) => _statusOf(d) == _Status.review)) return _Status.review;
+    return _Status.pass;
   }
 
-  // Format product name cleanly
-  String get _productName => formatProductName(_result.imageFilename, maxLength: 30);
+  String get _documentName => _overall == _Status.pass ? 'Compliance certificate' : 'Non-compliance notice';
+
+  static const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  String get _dateText {
+    final dt = DateTime.tryParse(_result.timestamp)?.toLocal();
+    if (dt == null) return '';
+    final hh = dt.hour.toString().padLeft(2, '0');
+    final mm = dt.minute.toString().padLeft(2, '0');
+    return '${dt.day} ${_months[dt.month - 1]} ${dt.year}, $hh:$mm';
+  }
 
   @override
   Widget build(BuildContext context) {
+    final wide = MediaQuery.of(context).size.width >= 840;
+
     return Scaffold(
+      backgroundColor: LL.paper,
       appBar: AppBar(
+        backgroundColor: LL.paper,
+        surfaceTintColor: Colors.transparent,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go('/scanner'),
+          tooltip: 'Back',
+          icon: const Icon(Icons.arrow_back, color: LL.text),
+          onPressed: () => context.canPop() ? context.pop() : context.go('/home'),
         ),
-        title: const Text('Report'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.ios_share, size: 20),
-            tooltip: 'Share Report',
-            onPressed: () => _showToast('Report link copied'),
+        titleSpacing: 0,
+        title: Row(
+          children: [
+            const Text('Inspection', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w500, color: LL.text)),
+            const SizedBox(width: 10),
+            if (_shortId.isNotEmpty) Text(_shortId, style: LL.mono(size: 13)),
+          ],
+        ),
+      ),
+      body: ListView(
+        padding: EdgeInsets.fromLTRB(wide ? 40 : 16, 8, wide ? 40 : 16, 32),
+        children: [
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _slip(),
+                  const SizedBox(height: 16),
+                  _actions(),
+                ],
+              ),
+            ),
           ),
         ],
       ),
-      body: Stack(
+    );
+  }
+
+  Widget _slip() {
+    final decls = _result.declarations;
+    final passing = decls.where((d) => _statusOf(d) == _Status.pass).length;
+    final total = decls.isNotEmpty ? decls.length : _result.totalFields;
+    final passCount = decls.isNotEmpty ? passing : _result.compliantFields;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: LL.surface,
+        border: Border.all(color: LL.line),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SingleChildScrollView(
-            padding: const EdgeInsets.only(left: 14, right: 14, top: 14, bottom: 100),
+          // Header: product, date, stamp
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        (_result.productName ?? '').trim().isNotEmpty
+                            ? _result.productName!.trim()
+                            : formatProductName(_result.imageFilename, maxLength: 60),
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: LL.text, letterSpacing: -0.3),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        [if (_dateText.isNotEmpty) _dateText, '$passCount of $total declarations pass'].join(' · '),
+                        style: const TextStyle(fontSize: 13, color: LL.muted),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                _Stamp(_overall),
+              ],
+            ),
+          ),
+          const Divider(height: 1, thickness: 1, color: LL.line),
+
+          // Declarations
+          if (_loadingDetail)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 32),
+              child: Center(
+                child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: LL.accent)),
+              ),
+            )
+          else if (_detailError != null)
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                children: [
+                  Expanded(child: Text(_detailError!, style: const TextStyle(fontSize: 13, color: LL.danger))),
+                  TextButton(
+                    onPressed: _loadDetail,
+                    style: TextButton.styleFrom(foregroundColor: LL.accent),
+                    child: const Text('Try again'),
+                  ),
+                ],
+              ),
+            )
+          else if (decls.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(20),
+              child: Text('No text was detected on this label.', style: TextStyle(fontSize: 14, color: LL.muted)),
+            )
+          else
+            for (var i = 0; i < decls.length; i++) ...[
+              if (i > 0) const Divider(height: 1, thickness: 1, indent: 20, endIndent: 20, color: LL.line),
+              _declarationRow(decls[i]),
+            ],
+
+          // Evidence: every photo of a product inspection, or the single photo's hash
+          if (_result.photos.isNotEmpty) ...[
+            const Divider(height: 1, thickness: 1, color: LL.line),
+            _photoEvidence(),
+          ] else if ((_result.imageHashSha256 ?? '').isNotEmpty) ...[
+            const Divider(height: 1, thickness: 1, color: LL.line),
+            _evidence(_result.imageHashSha256!),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _declarationRow(DeclarationFieldModel d) {
+    final status = _statusOf(d);
+    final reason = d.primaryReason;
+    final (IconData icon, Color color) = switch (status) {
+      _Status.pass => (Icons.check, LL.accent),
+      _Status.violation => (Icons.close, LL.danger),
+      _Status.review => (Icons.help_outline, LL.warning),
+    };
+    final font = d.fontHeightMm == null
+        ? null
+        : d.requiredFontHeightMm == null
+            ? '${d.fontHeightMm!.toStringAsFixed(1)} mm'
+            : '${d.fontHeightMm!.toStringAsFixed(1)} mm (min ${d.requiredFontHeightMm!.toStringAsFixed(1)})';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(padding: const EdgeInsets.only(top: 1), child: Icon(icon, size: 18, color: color)),
+          const SizedBox(width: 12),
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── Product Name Hero ──
-                _buildProductHero(),
-                const SizedBox(height: 14),
-
-                // ── Score & Donut Chart ──
-                _buildScoreSection(),
-                const SizedBox(height: 14),
-
-                // ── Geometry Review Banner ──
-                if (_hasReviewItems) ...[
-                  _buildReviewBanner(),
-                  const SizedBox(height: 14),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(d.displayName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: LL.text)),
+                    ),
+                    if (font != null) ...[
+                      const SizedBox(width: 12),
+                      Text(font, style: LL.mono(size: 12)),
+                    ],
+                  ],
+                ),
+                if (d.value != null && d.value!.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(d.value!, style: const TextStyle(fontSize: 13, color: LL.muted)),
+                ] else if (!d.detected) ...[
+                  const SizedBox(height: 3),
+                  const Text('Not found on this label', style: TextStyle(fontSize: 13, color: LL.muted)),
                 ],
-
-                // ── SHA-256 Evidence Badge (collapsible) ──
-                if (_result.imageHashSha256 != null &&
-                    _result.imageHashSha256!.isNotEmpty) ...[
-                  _buildHashBadge(),
-                  const SizedBox(height: 14),
+                if (reason != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    reason,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      height: 1.4,
+                      color: status == _Status.violation
+                          ? LL.danger
+                          : status == _Status.review
+                              ? LL.warning
+                              : LL.muted,
+                    ),
+                  ),
                 ],
-
-                // ── Declarations Checklist ──
-                _buildDeclarationsSection(),
               ],
             ),
-          ),
-
-          // ── Bottom Sticky Export Buttons ──
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: _buildBottomExportBar(),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildProductHero() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: LenseScanTheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
+  Widget _photoEvidence() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 8, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Photos, SHA-256 hashed before processing', style: TextStyle(fontSize: 12, color: LL.faint)),
+          const SizedBox(height: 6),
+          for (final p in _result.photos)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text.rich(
+                          TextSpan(children: [
+                            TextSpan(text: p.filename, style: const TextStyle(fontSize: 13, color: LL.text)),
+                            TextSpan(
+                              text: p.hasMarker ? '  ·  40 mm marker' : '  ·  text only',
+                              style: TextStyle(fontSize: 12, color: p.hasMarker ? LL.accent : LL.muted),
+                            ),
+                          ]),
+                        ),
+                        const SizedBox(height: 2),
+                        SelectableText(p.sha256, style: LL.mono(size: 11.5, color: LL.muted)),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Copy hash',
+                    icon: const Icon(Icons.copy_outlined, size: 16, color: LL.muted),
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: p.sha256));
+                      _toast('Hash copied');
+                    },
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
+    );
+  }
+
+  Widget _evidence(String hash) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 8, 14),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-            child: Text(
-              _productName,
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w600,
-                color: LenseScanTheme.onSurface,
-                letterSpacing: -0.2,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: LenseScanTheme.surfaceContainerLow,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(Icons.inventory_2_outlined,
-                size: 22, color: LenseScanTheme.primary),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildScoreSection() {
-    final hasReview = _hasReviewItems;
-    final isCompliant = _result.overallCompliant && !hasReview && _violationCount == 0;
-
-    Color badgeBg;
-    Color badgeText;
-    String badgeLabel;
-
-    if (hasReview) {
-      badgeBg = const Color(0xFFFEF3C7); // amber-100
-      badgeText = const Color(0xFFB45309); // amber-700
-      badgeLabel = 'Review Required';
-    } else if (isCompliant) {
-      badgeBg = LenseScanTheme.secondaryContainer;
-      badgeText = LenseScanTheme.onSecondaryContainer;
-      badgeLabel = 'Compliant';
-    } else {
-      badgeBg = LenseScanTheme.errorContainer;
-      badgeText = LenseScanTheme.onErrorContainer;
-      badgeLabel = 'Non-Compliant';
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: LenseScanTheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          // Score header
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                _compliancePercent,
-                style: const TextStyle(
-                  fontSize: 36,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -1.08,
-                  color: LenseScanTheme.onSurface,
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                decoration: BoxDecoration(
-                  color: badgeBg,
-                  borderRadius: BorderRadius.circular(9999),
-                ),
-                child: Text(
-                  badgeLabel,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: badgeText,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          // Donut chart
-          _buildDonutChart(),
-          const SizedBox(height: 14),
-
-          // Legend
-          _buildLegend(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDonutChart() {
-    final total = _result.totalFields > 0 ? _result.totalFields : 1;
-    final compliant = _compliantCount;
-    final violation = _violationCount;
-    final review = _reviewCount;
-
-    return SizedBox(
-      width: 160,
-      height: 160,
-      child: CustomPaint(
-        painter: _DonutPainter(
-          compliant: compliant,
-          violation: violation,
-          review: review,
-          total: total,
-        ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                '${_result.totalFields} Rules',
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  color: LenseScanTheme.onSurface,
-                  letterSpacing: -0.2,
-                ),
-              ),
-              Text(
-                'Checked',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: LenseScanTheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLegend() {
-    return Row(
-      children: [
-        _buildLegendItem(
-          color: LenseScanTheme.secondary,
-          label: 'Compliant',
-          count: _compliantCount,
-          bgColor: LenseScanTheme.surfaceContainerLow,
-        ),
-        const SizedBox(width: 4),
-        _buildLegendItem(
-          color: LenseScanTheme.error,
-          label: 'Violation',
-          count: _violationCount,
-          bgColor: LenseScanTheme.errorContainer.withValues(alpha: 0.4),
-        ),
-        const SizedBox(width: 4),
-        _buildLegendItem(
-          color: LenseScanTheme.warningAmber,
-          label: 'Review',
-          count: _reviewCount,
-          bgColor: LenseScanTheme.warningAmberLight,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildLegendItem({
-    required Color color,
-    required String label,
-    required int count,
-    required Color bgColor,
-  }) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: color,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                '$label $count',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: LenseScanTheme.onSurface,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildReviewBanner() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: LenseScanTheme.warningAmberLight,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: LenseScanTheme.warningAmberBorder.withValues(alpha: 0.5),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.warning_rounded, size: 20, color: Color(0xFFB45309)),
-          const SizedBox(width: 8),
-          const Expanded(
-            child: Text(
-              'Net Quantity — needs manual check',
-              style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w500,
-                color: Color(0xFF78350F),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHashBadge() {
-    final hash = _result.imageHashSha256!;
-    return GestureDetector(
-      onTap: () => setState(() => _showHashDetail = !_showHashDetail),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: LenseScanTheme.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: LenseScanTheme.outlineVariant.withValues(alpha: 0.3),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.verified_user_rounded, size: 16,
-                    color: LenseScanTheme.secondary),
-                const SizedBox(width: 6),
-                Text(
-                  'Evidence Integrity Seal',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.33,
-                    color: LenseScanTheme.secondary,
-                  ),
-                ),
-                const Spacer(),
-                GestureDetector(
-                  onTap: () => _copyHashToClipboard(hash),
-                  child: Icon(Icons.copy_rounded, size: 14,
-                      color: LenseScanTheme.onSurfaceVariant),
-                ),
-                const SizedBox(width: 8),
-                Icon(
-                  _showHashDetail ? Icons.expand_less : Icons.expand_more,
-                  size: 18,
-                  color: LenseScanTheme.onSurfaceVariant,
-                ),
+                const Text('Image SHA-256, hashed before processing', style: TextStyle(fontSize: 12, color: LL.faint)),
+                const SizedBox(height: 4),
+                SelectableText(hash, style: LL.mono(size: 12, color: LL.text)),
               ],
             ),
-            if (_showHashDetail) ...[
-              const SizedBox(height: 8),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: LenseScanTheme.surfaceContainerLowest,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  hash,
-                  style: const TextStyle(
-                    fontFamily: 'monospace',
-                    fontSize: 10,
-                    color: LenseScanTheme.onSurfaceVariant,
-                    letterSpacing: 0.3,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDeclarationsSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-          child: Row(
-            children: [
-              Text(
-                'Declarations',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                  color: LenseScanTheme.onSurface,
-                  letterSpacing: -0.2,
-                ),
-              ),
-              if (_isLoadingFullReport) ...[
-                const SizedBox(width: 8),
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ],
-            ],
           ),
-        ),
-        const SizedBox(height: 8),
-
-        if (_fetchError != null)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(
-              _fetchError!,
-              style: TextStyle(
-                color: LenseScanTheme.warningAmber,
-                fontSize: 13,
-              ),
-            ),
-          ),
-
-        ..._result.declarations.map(
-          (decl) => Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: ComplianceCard(declaration: decl),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBottomExportBar() {
-    return Container(
-      decoration: BoxDecoration(
-        color: LenseScanTheme.surfaceContainerLowest.withValues(alpha: 0.9),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            offset: const Offset(0, -4),
-            blurRadius: 16,
+          IconButton(
+            tooltip: 'Copy hash',
+            icon: const Icon(Icons.copy_outlined, size: 18, color: LL.muted),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: hash));
+              _toast('Hash copied');
+            },
           ),
         ],
       ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          child: Row(
-            children: [
-              // Export PDF
-              Expanded(
-                child: SizedBox(
-                  height: 48,
-                  child: TextButton.icon(
-                    onPressed: _isDownloadingPdf
-                        ? null
-                        : () => _downloadExport(isDocx: false),
-                    icon: _isDownloadingPdf
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.download, size: 20),
-                    label: const Text('Export PDF'),
-                    style: TextButton.styleFrom(
-                      backgroundColor: LenseScanTheme.surfaceContainerHigh,
-                      foregroundColor: LenseScanTheme.onSurface,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      textStyle: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              // Export Notice (DOCX)
-              Expanded(
-                child: SizedBox(
-                  height: 48,
-                  child: ElevatedButton.icon(
-                    onPressed: _isDownloadingDocx
-                        ? null
-                        : () => _downloadExport(isDocx: true),
-                    icon: _isDownloadingDocx
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
-                          )
-                        : const Icon(Icons.description_outlined, size: 20),
-                    label: const Text('Export Notice'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: LenseScanTheme.primary,
-                      foregroundColor: LenseScanTheme.onPrimary,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      elevation: 4,
-                      shadowColor: const Color(0xFF003633).withValues(alpha: 0.3),
-                      textStyle: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
+    );
+  }
+
+  Widget _actions() {
+    Widget spinner(Color c) => SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: c));
+    final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(8));
+    const pad = EdgeInsets.symmetric(horizontal: 16, vertical: 14);
+
+    final word = OutlinedButton.icon(
+          onPressed: _downloadingDocx ? null : () => _download(docx: true),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: LL.text,
+            side: const BorderSide(color: LL.line),
+            backgroundColor: LL.surface,
+            padding: pad,
+            shape: shape,
           ),
-        ),
-      ),
+          icon: _downloadingDocx ? spinner(LL.muted) : const Icon(Icons.description_outlined, size: 18),
+          label: const Text('Word file', style: TextStyle(fontSize: 14)),
+        );
+    final pdf = FilledButton.icon(
+          onPressed: _downloadingPdf ? null : () => _download(docx: false),
+          style: FilledButton.styleFrom(
+            backgroundColor: LL.accent,
+            foregroundColor: LL.onAccent,
+            padding: pad,
+            shape: shape,
+          ),
+          icon: _downloadingPdf ? spinner(LL.onAccent) : const Icon(Icons.download_outlined, size: 18),
+          label: Text('$_documentName (PDF)', style: const TextStyle(fontSize: 14)),
+        );
+
+    // Phones: full-width stack with the notice first. Wider: side by side, right-aligned.
+    if (MediaQuery.of(context).size.width < 600) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [pdf, const SizedBox(height: 10), word],
+      );
+    }
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [word, const SizedBox(width: 10), pdf],
     );
   }
 }
 
-/// Custom donut chart painter.
-class _DonutPainter extends CustomPainter {
-  final int compliant;
-  final int violation;
-  final int review;
-  final int total;
-
-  _DonutPainter({
-    required this.compliant,
-    required this.violation,
-    required this.review,
-    required this.total,
-  });
+/// The overall result, set like an inspector's rubber stamp.
+class _Stamp extends StatelessWidget {
+  final _Status status;
+  const _Stamp(this.status);
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2 - 12;
-    const strokeWidth = 22.0;
-
-    // Background track
-    final trackPaint = Paint()
-      ..color = LenseScanTheme.surfaceContainerLow
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth;
-    canvas.drawCircle(center, radius, trackPaint);
-
-    final rect = Rect.fromCircle(center: center, radius: radius);
-    const startAngle = -math.pi / 2;
-
-    // Compliant segment
-    if (compliant > 0) {
-      final sweep = (compliant / total) * 2 * math.pi;
-      final paint = Paint()
-        ..color = LenseScanTheme.secondary
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeWidth
-        ..strokeCap = StrokeCap.round;
-      canvas.drawArc(rect, startAngle, sweep, false, paint);
-    }
-
-    // Violation segment
-    if (violation > 0) {
-      final compliantSweep = (compliant / total) * 2 * math.pi;
-      final gap = 0.06; // small gap between segments
-      final sweep = (violation / total) * 2 * math.pi;
-      final paint = Paint()
-        ..color = LenseScanTheme.error
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeWidth
-        ..strokeCap = StrokeCap.round;
-      canvas.drawArc(rect, startAngle + compliantSweep + gap, sweep - gap, false, paint);
-    }
-
-    // Review segment
-    if (review > 0) {
-      final prevSweep = ((compliant + violation) / total) * 2 * math.pi;
-      final gap = 0.06;
-      final sweep = (review / total) * 2 * math.pi;
-      final paint = Paint()
-        ..color = LenseScanTheme.warningAmber
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeWidth
-        ..strokeCap = StrokeCap.round;
-      canvas.drawArc(rect, startAngle + prevSweep + gap, sweep - gap, false, paint);
-    }
+  Widget build(BuildContext context) {
+    final (String label, Color color) = switch (status) {
+      _Status.pass => ('COMPLIANT', LL.accent),
+      _Status.violation => ('VIOLATION', LL.danger),
+      _Status.review => ('REVIEW', LL.warning),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        border: Border.all(color: color, width: 1.6),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: 1.6, color: color),
+      ),
+    );
   }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

@@ -71,6 +71,25 @@ def test_aruco_detection_math():
     assert result.calibration_confidence >= 0.70
 
 
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_real_photo_without_marker_is_not_calibrated():
+    """A real pack photo with no marker must stay uncalibrated: round or rectangular label art
+    must never be mistaken for a coin or ID card (it previously came back as coin_26mm)."""
+    result = calibrate_image((FIXTURES / "sargam_front_no_marker.jpg").read_bytes())
+    assert result.calibration_method == "none"
+    assert result.calibration_status == "no_reference"
+    assert result.pixels_per_mm is None
+
+
+def test_real_photo_with_marker_is_calibrated_by_aruco():
+    """The same pack photographed with the printed 40 mm marker is calibrated from the marker."""
+    result = calibrate_image((FIXTURES / "sargam_front_with_marker.jpg").read_bytes())
+    assert result.calibration_method == "aruco_40mm"
+    assert result.pixels_per_mm is not None and result.pixels_per_mm > 0
+
+
 def test_uncalibrated_quick_scan_no_guessed_dpi():
     """Verify that when no reference marker exists, scale is None and never fixed to 300 DPI."""
     blank = np.full((600, 600, 3), 240, dtype=np.uint8)
@@ -124,9 +143,9 @@ def test_pre_capture_quality_blur_and_glare():
     assert cal_glare.quality_gate.marker_has_glare is True or cal_glare.quality_gate.status_code != "marker_detected_ready"
 
 
-def test_schedule_ii_uncertainty_interval_logic():
+def test_rule_7_font_uncertainty_interval_logic():
     """
-    Verify 3-way Schedule II decision logic with measurement uncertainty:
+    Verify 3-way Rule 7(2) font-height decision logic with measurement uncertainty:
     Case A: Upper & lower bound strictly >= threshold -> Pass
     Case B: Upper bound < threshold -> Hard violation
     Case C: Interval straddles threshold -> Benefit-of-doubt pass + manual review required
@@ -185,7 +204,8 @@ def test_schedule_ii_uncertainty_interval_logic():
     # Statutory benefit-of-the-doubt: compliant remains True, manual review flagged
     assert net_straddle.compliant is True
     assert net_straddle.font_review_required is True
-    assert "straddles Schedule II threshold" in (net_straddle.font_review_reason or "")
+    assert "straddles Rule 7(2) minimum" in (net_straddle.font_review_reason or "")
+    assert "Schedule II" not in (net_straddle.font_review_reason or "")
 
 
 def test_not_detected_low_coverage_vs_confirmed_absent():

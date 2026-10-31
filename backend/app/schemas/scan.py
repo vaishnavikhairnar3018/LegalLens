@@ -98,14 +98,17 @@ class DeclarationField(BaseModel):
         None, description="Informational readability note on relative text prominence"
     )
     required_font_height_mm: Optional[float] = Field(
-        None, description="Minimum required font height per LMPC rules"
+        None, description="Minimum required font height per Rule 7(2) Table-I (None if PDP area unknown)"
+    )
+    pdp_area_cm2: Optional[float] = Field(
+        None, description="Officer-supplied Principal Display Panel area used for the Rule 7(2) lookup"
     )
     confidence: Optional[float] = Field(
         None, description="OCR confidence for this detection"
     )
-    # Placement validation (Rule 6 PDP compliance)
+    # Placement validation (Rule 8(1) PDP compliance)
     placement_compliant: bool = Field(
-        True, description="Does this declaration comply with Rule 6 placement rules?"
+        True, description="Does this declaration comply with Rule 8(1) placement rules?"
     )
     placement_violations: List[str] = Field(
         default_factory=list,
@@ -120,6 +123,24 @@ class DeclarationField(BaseModel):
     placement_review_reason: Optional[str] = Field(
         None, description="Reason why placement is flagged for manual officer verification"
     )
+    price_review_required: bool = Field(
+        False, description="Flagged for manual officer review if conflicting MRPs are detected on the package"
+    )
+    price_review_reason: Optional[str] = Field(
+        None, description="Details of the conflicting MRP declarations"
+    )
+    note: Optional[str] = Field(
+        None, description="Why a declaration is not required on this package (e.g. country of origin on a domestic product)"
+    )
+
+
+class PhotoEvidence(BaseModel):
+    """One photo of a multi-photo product inspection, hashed on its raw uploaded bytes."""
+    filename: str
+    image_hash_sha256: str
+    calibration_method: str = Field(..., description="aruco_40mm when the marker was found, else none")
+    pixels_per_mm: Optional[float] = None
+    ocr_regions: int = Field(0, description="Number of text regions read from this photo")
 
 
 class ComplianceReport(BaseModel):
@@ -133,6 +154,7 @@ class ComplianceReport(BaseModel):
         description="When the scan was performed",
     )
     image_filename: str
+    product_name: Optional[str] = Field(None, description="Product name entered by the inspecting officer")
     image_hash_sha256: Optional[str] = Field(
         None, description="SHA-256 evidence integrity hash of uploaded image"
     )
@@ -182,5 +204,9 @@ class ComplianceReport(BaseModel):
     )
     summary: str = Field(
         ..., description="Human-readable compliance summary"
+    )
+    photos: List[PhotoEvidence] = Field(
+        default_factory=list,
+        description="Every photo of a multi-photo product inspection (empty for single-photo scans)",
     )
 

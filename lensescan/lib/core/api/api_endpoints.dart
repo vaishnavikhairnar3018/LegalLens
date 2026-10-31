@@ -11,6 +11,7 @@ class ApiEndpoints {
 
   // Scan
   static const String scan = '/scan/';
+  static const String scanProduct = '/scan/product';
 
   // Inspections
   static const String inspections = '/inspections/';

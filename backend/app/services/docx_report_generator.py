@@ -6,7 +6,7 @@ the statutory PDF content for editing by enforcement officials.
 
 import io
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from docx import Document
 from docx.shared import Inches, Pt, Cm, RGBColor
@@ -27,10 +27,13 @@ def generate_inspection_docx(
     non_compliant_fields: int,
     summary: str,
     declarations: List[Dict[str, Any]],
+    photos: Optional[List[Dict[str, Any]]] = None,
+    product_name: Optional[str] = None,
 ) -> bytes:
     """
     Generate an editable Word document (DOCX) version of the
     Ministry of Consumer Affairs Statutory Inspection Notice / Certificate.
+    `photos` lists every photo of a multi-photo product inspection with its evidence hash.
     Returns the DOCX content as bytes.
     """
     doc = Document()
@@ -101,9 +104,10 @@ def generate_inspection_docx(
     run.font.size = Pt(11)
 
     # Metadata table
-    meta_table = doc.add_table(rows=6, cols=2)
+    meta_table = doc.add_table(rows=7, cols=2)
     meta_table.alignment = WD_TABLE_ALIGNMENT.LEFT
     meta_data = [
+        ("Product:", product_name or "Not recorded"),
         ("Inspection ID:", inspection_id),
         ("Date & Time:", timestamp.strftime("%d %B %Y, %H:%M:%S IST") if timestamp else "—"),
         ("Inspecting Officer:", f"{officer_name} (ID: {officer_id})"),
@@ -124,6 +128,27 @@ def generate_inspection_docx(
         for paragraph in cell_value.paragraphs:
             for run in paragraph.runs:
                 run.font.size = Pt(9)
+
+    # ── Evidence photos (multi-photo product inspections) ──
+    if photos:
+        doc.add_paragraph()
+        photos_title = doc.add_paragraph()
+        run = photos_title.add_run("EVIDENCE PHOTOS (SHA-256 OF RAW UPLOADED BYTES)")
+        run.bold = True
+        run.font.size = Pt(11)
+        photo_table = doc.add_table(rows=len(photos) + 1, cols=3)
+        photo_table.style = 'Table Grid'
+        for col, heading in enumerate(["Photo", "40 mm marker", "SHA-256"]):
+            photo_table.cell(0, col).text = heading
+        for row, p in enumerate(photos, start=1):
+            photo_table.cell(row, 0).text = str(p.get("filename", ""))
+            photo_table.cell(row, 1).text = "Yes" if p.get("pixels_per_mm") else "No (text only)"
+            photo_table.cell(row, 2).text = str(p.get("image_hash_sha256", ""))
+        for table_row in photo_table.rows:
+            for cell in table_row.cells:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.font.size = Pt(8)
 
     # ── Compliance Summary ──
     doc.add_paragraph()

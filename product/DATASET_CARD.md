@@ -36,15 +36,15 @@ Every image is cryptographically stamped with a **SHA-256 hash** upon capture, f
 
 1. **Rule 6(1)(e) — Absence of Maximum Retail Price (MRP):**
    - Packaged goods missing conspicuous, tax-inclusive MRP declarations.
-2. **Rule 6(1)(a) & Rule 12 — Omission of Net Quantity:**
+2. **Rule 6(1)(c) & Rule 12 — Omission of Net Quantity:**
    - Real industrial defect where net quantity numerical value/unit was blanked during batch laser/inkjet coding.
-3. **Schedule II — Minimum Font Size Non-Compliance:**
+3. **Rule 7(2) — Minimum Font Size Non-Compliance:**
    - Mandatory declaration font heights rendered below statutory limits relative to Principal Display Panel area.
 4. **Rule 6(1)(d) — Date of Manufacture / Packing / Expiry:**
    - Absence of manufacturing date or month/year stamp.
-5. **Rule 6(1)(da) — Consumer Grievance Coordinates:**
+5. **Rule 6(2) — Consumer Grievance Coordinates:**
    - Omission of telephone, email, or postal grievance redressal addresses.
-6. **Rule 6(2) — Crimp Seam / Placement Non-Compliance:**
+6. **Rule 8(1) — Crimp Seam / Placement Non-Compliance:**
    - Mandatory text stamped across heat seals, folds, or distorted along cylindrical canister radiuses.
 
 ---
@@ -61,7 +61,7 @@ Every image is cryptographically stamped with a **SHA-256 hash** upon capture, f
 | `packaging_type` | String | Packaging form factor (Pillow Pouch, Spout Pouch, Box, Canister, Bottle) |
 | `panel_type` | String | Specific packaging face photographed |
 | `ground_truth_status` | Enum | `COMPLIANT`, `VIOLATION`, `REVIEW` |
-| `statutory_citations` | String | Legal Metrology Rule citation (e.g., Rule 6(1)(e), Schedule II) |
+| `statutory_citations` | String | Legal Metrology Rule citation (e.g., Rule 6(1)(e), Rule 7(2)) |
 | `violation_details` | String | Description of statutory defect |
 | `declared_mrp` | String | Extracted/labeled MRP value |
 | `declared_net_qty` | String | Extracted/labeled Net Quantity |

@@ -149,7 +149,7 @@ class _ComplianceCardState extends State<ComplianceCard> {
                   // Rule 6 Placement
                   if (!decl.placementCompliant)
                     _buildDetailRow(
-                      'Placement (Rule 6)',
+                      'Placement (Rule 8)',
                       decl.placementViolations.isNotEmpty
                           ? decl.placementViolations.first
                           : 'Non-compliant placement on label',

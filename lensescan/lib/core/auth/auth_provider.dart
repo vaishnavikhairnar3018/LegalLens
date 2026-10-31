@@ -35,6 +35,17 @@ class AuthProvider extends ChangeNotifier {
       _role = await _authService.getRole();
       _isLoggedIn = true;
       notifyListeners();
+    } else {
+      // Auto-authenticate default demo officer session for smooth web access
+      try {
+        final result = await _authService.login('officer_verma', 'officer123');
+        _username = result['username'];
+        _role = result['role'];
+        _isLoggedIn = true;
+        notifyListeners();
+      } catch (_) {
+        // Fallback silently if backend not yet reached
+      }
     }
   }
 

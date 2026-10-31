@@ -13,27 +13,25 @@
       "description": "MRP inclusive of all taxes must be declared on the package",
       "required": true,
       "section_reference": "Rule 6(1)(e)",
-      "format_regex": "(?:M\\.?\\s*R\\.?\\s*P\\.?|Maximum\\s*Retail\\s*Price|Retail\\s*Price)\\s*[:\\-?]?\\s*[₹Rs\\.\\?]*\\s*[\\d,]+(?:\\.\\d{1,2})?",
+      "format_regex": "(?:M\\.?\\s*R\\.?\\s*P\\.?|Maximum\\s*Retail\\s*Price|Retail\\s*Price)\\s*[:\\-?]?\\s*[₹Rs\\.\\?]*\\s*[:\\-]?\\s*[\\d,]+(?:\\.\\d{1,2})?",
       "must_include_taxes": true,
-      "taxes_keywords": ["incl", "inclusive", "all taxes", "all tax"],
-      "min_font_height_mm": {
-        "up_to_200g": 1,
-        "200g_to_500g": 2,
-        "above_500g": 4
-      }
+      "taxes_keywords": [
+        "incl",
+        "inclusive",
+        "all taxes",
+        "all tax"
+      ],
+      "taxes_ocr_pattern": "\\b[a-z]*[tl1i|]axes?\\b|\\b[a-z]?[iul1|]nc[lk1i|]",
+      "font_size_applies": true
     },
     {
       "field": "net_quantity",
       "display_name": "Net Quantity",
       "description": "Net weight, measure, or number of commodity must be declared",
       "required": true,
-      "section_reference": "Rule 6(1)(d)",
-      "format_regex": "(?:N[eiaozct]{1,2}t?\\.?\\s*(?:Wt\\.?|Weight|Qty\\.?|Quantity|Content|Vol\\.?|Volume))\\s*[:\\-]?\\s*[\\d.]+\\s*(?:g|gm|gms|kg|kgs|ml|mL|l|L|ltr|litre|cm|m|mm|pieces?|pcs?|nos?)",
-      "min_font_height_mm": {
-        "up_to_200g": 1,
-        "200g_to_500g": 2,
-        "above_500g": 4
-      }
+      "section_reference": "Rule 6(1)(c)",
+      "format_regex": "\\d[\\d.,]*\\s*(?:g|gm|gms|kg|kgs|ml|mL|l|L|ltr|litre|cm|m|mm|pieces?|pcs?|nos?|N|U)\\b",
+      "font_size_applies": true
     },
     {
       "field": "manufacturer_details",
@@ -43,25 +41,25 @@
       "section_reference": "Rule 6(1)(a)",
       "format_regex": "(?:REGD[^\\w]*OFF[A-Z]*|Manu?f(?:actur(?:ed|ing)|d\\.?)?|Packed|Marketed|Distributed|Imported|Pvt|Ltd|Enterprises|Industries|Wafers)",
       "requires_pin_code": true,
-      "min_font_height_mm": null
+      "font_size_applies": true
     },
     {
       "field": "manufacturing_date",
       "display_name": "Month & Year of Manufacture/Packing",
       "description": "Month and year in which the commodity was manufactured, packed, or imported",
       "required": true,
-      "section_reference": "Rule 6(1)(f)",
+      "section_reference": "Rule 6(1)(d)",
       "format_regex": "(?:Mf[gd]\\.?|Manu?f(?:actur(?:ed|ing))?|Pack(?:ed|ing)?|PKD\\.?|Dom|Date\\s*of\\s*(?:Manufacture|Mfg|Packing))\\s*(?:Date|On|Dt\\.?)?\\s*[:\\-]?",
-      "min_font_height_mm": null
+      "font_size_applies": true
     },
     {
       "field": "best_before",
       "display_name": "Best Before / Expiry Date",
       "description": "Best before or use-by date for the commodity",
       "required": true,
-      "section_reference": "Rule 6(1)(g)",
+      "section_reference": "Rule 6(1)(da)",
       "format_regex": "(?:Best\\s*Before|Exp(?:iry)?\\.?\\s*(?:Date)?|Use\\s*By|BB|Shelf\\s*Life)",
-      "min_font_height_mm": null
+      "font_size_applies": true
     },
     {
       "field": "consumer_care",
@@ -69,18 +67,19 @@
       "description": "Consumer care contact: name, postal address, telephone, and email",
       "required": true,
       "section_reference": "Rule 6(2)",
-      "format_regex": "(?:[CLO]onsumer|Customer)\\s*(?:Care|Service|Helpline|Grievance|Support|Executive|Cell|Contact)",
+      "format_regex": "(?:[CLO][o0]ns[uv]mer|Cus?tomer|\\bstomer)\\s*(?:Care|Service|Helpline|Grievance|Support|Executive|Cell|Complaint|Contact)|\\bCare\\s*(?:No|Number)\\b\\.?\\s*[:\\-]?\\s*\\+?\\d",
       "requires_phone_or_email": true,
-      "min_font_height_mm": null
+      "font_size_applies": true
     },
     {
       "field": "country_of_origin",
       "display_name": "Country of Origin",
       "description": "Mandatory for imported commodities; recommended for domestic products",
       "required": true,
-      "section_reference": "Rule 6(1)(h)",
+      "required_when": "imported",
+      "section_reference": "Rule 6(1)(aa)",
       "format_regex": "(?:Made\\s*in|Product\\s*of|Country\\s*of\\s*Origin|Assembled\\s*in|Origin)",
-      "min_font_height_mm": null
+      "font_size_applies": true
     },
     {
       "field": "generic_name",
@@ -90,34 +89,88 @@
       "section_reference": "Rule 6(1)(b)",
       "format_regex": null,
       "note": "Detected heuristically — typically the most prominent text on the principal display panel",
-      "min_font_height_mm": null
+      "font_size_applies": true
     }
   ],
   "font_size_schedule": {
-    "description": "Minimum font height requirements per LMPC Rules 2011, Schedule II",
-    "by_weight_or_volume": {
-      "up_to_200g_ml": {
-        "normal_print": 1,
-        "blown_formed_molded": 2,
-        "unit": "mm"
+    "description": "LMPC Rules 2011, Rule 7(2) Table-I as substituted vide GSR 629(E) dated 23.06.2017 (w.e.f. 01.01.2018): minimum height of numerals and letters by area of the Principal Display Panel. Tier upper edges are treated as inclusive.",
+    "unit": "mm",
+    "rule_7_2_table_i": [
+      {
+        "max_pdp_area_cm2": 50,
+        "normal_print": 1.0,
+        "blown_formed_molded": 2.0
       },
-      "200g_to_500g_ml": {
-        "normal_print": 2,
-        "blown_formed_molded": 4,
-        "unit": "mm"
+      {
+        "max_pdp_area_cm2": 100,
+        "normal_print": 1.5,
+        "blown_formed_molded": 3.0
       },
-      "above_500g_ml": {
-        "normal_print": 4,
-        "blown_formed_molded": 6,
-        "unit": "mm"
+      {
+        "max_pdp_area_cm2": 500,
+        "normal_print": 2.5,
+        "blown_formed_molded": 4.0
+      },
+      {
+        "max_pdp_area_cm2": 2500,
+        "normal_print": 4.0,
+        "blown_formed_molded": 6.0
+      },
+      {
+        "max_pdp_area_cm2": null,
+        "normal_print": 6.0,
+        "blown_formed_molded": 6.0
       }
-    },
-    "by_pdp_area": {
-      "up_to_100_cm2": {"normal_print": 1, "blown_formed_molded": 2, "unit": "mm"},
-      "100_to_500_cm2": {"normal_print": 2, "blown_formed_molded": 4, "unit": "mm"},
-      "500_to_2500_cm2": {"normal_print": 4, "blown_formed_molded": 6, "unit": "mm"},
-      "above_2500_cm2": {"normal_print": 6, "blown_formed_molded": 6, "unit": "mm"}
-    },
-    "width_rule": "Width of any letter or numeral must not be less than one-third of its height (except 1, i, I, l)"
+    ],
+    "width_rule": "Rule 7(3): Width of any letter or numeral must not be less than one-third of its height (except 1, i, I, l)"
+  },
+  "rule_12_6_prohibited_qualifiers": [
+    "approximate",
+    "approx",
+    "when packed",
+    "minimum",
+    "min",
+    "not less than",
+    "approximate weight"
+  ],
+  "rule_13_statutory_units": {
+    "valid_mass": [
+      "g",
+      "kg"
+    ],
+    "valid_volume": [
+      "ml",
+      "mL",
+      "l",
+      "L"
+    ],
+    "valid_length": [
+      "cm",
+      "m",
+      "mm"
+    ],
+    "valid_number": [
+      "N",
+      "U",
+      "pcs",
+      "piece",
+      "pieces",
+      "nos"
+    ],
+    "prohibited_symbols": [
+      "gm",
+      "gms",
+      "gms.",
+      "gm.",
+      "Kgs",
+      "kgs",
+      "KG",
+      "ML",
+      "ltr",
+      "ltrs",
+      "ltr.",
+      "litres",
+      "litre"
+    ]
   }
 }

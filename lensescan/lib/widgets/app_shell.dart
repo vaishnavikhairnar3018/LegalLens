@@ -1,17 +1,30 @@
-/// App shell — bottom navigation scaffold wrapping tabbed screens.
-///
-/// Provides a frosted-glass bottom nav bar with Home, Scan, History, Profile.
-/// Matches Stitch design: raised teal Scan button, blur backdrop.
+/// App shell — dark floating sidebar on wide screens, bottom tab bar on phones.
 library;
-
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 
 import '../config/theme.dart';
+import '../core/auth/auth_provider.dart';
+import 'legal_lens_logo.dart';
 
-/// Bottom navigation shell that wraps all main tab screens.
+class _NavItem {
+  final String label;
+  final String shortLabel;
+  final IconData icon;
+  const _NavItem(this.label, this.shortLabel, this.icon);
+}
+
+// Order matches the StatefulShellRoute branches in routes.dart.
+const _items = [
+  _NavItem('Overview', 'Overview', Icons.space_dashboard_outlined),
+  _NavItem('Scan a label', 'Scan', Icons.document_scanner_outlined),
+  _NavItem('Model', 'Model', Icons.insights_outlined),
+  _NavItem('Inspections', 'History', Icons.receipt_long_outlined),
+  _NavItem('Profile', 'Profile', Icons.person_outline),
+];
+
 class AppShell extends StatelessWidget {
   final Widget child;
   final StatefulNavigationShell navigationShell;
@@ -24,164 +37,202 @@ class AppShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = MediaQuery.of(context).size.width >= 840;
+
+    if (isDesktop) {
+      return Scaffold(
+        backgroundColor: LL.paper,
+        body: Row(
+          children: [
+            _Sidebar(navigationShell: navigationShell),
+            Expanded(child: child),
+          ],
+        ),
+      );
+    }
+
     return Scaffold(
+      backgroundColor: LL.paper,
       body: child,
-      bottomNavigationBar: _buildBottomNav(context),
+      bottomNavigationBar: _BottomNav(navigationShell: navigationShell),
     );
   }
+}
 
-  Widget _buildBottomNav(BuildContext context) {
-    final currentIndex = navigationShell.currentIndex;
+class _Sidebar extends StatelessWidget {
+  final StatefulNavigationShell navigationShell;
+  const _Sidebar({required this.navigationShell});
 
-    return ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-        child: Container(
-          decoration: BoxDecoration(
-            color: LenseScanTheme.surface.withValues(alpha: 0.9),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF0F172A).withValues(alpha: 0.06),
-                offset: const Offset(0, -4),
-                blurRadius: 16,
-              ),
-            ],
-          ),
-          child: SafeArea(
-            top: false,
-            child: SizedBox(
-              height: 64,
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
+    final current = navigationShell.currentIndex;
+    final username = auth.username ?? '';
+
+    return Container(
+      width: 244,
+      margin: const EdgeInsets.fromLTRB(16, 16, 0, 16),
+      decoration: BoxDecoration(color: LL.sidebar, borderRadius: BorderRadius.circular(28)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 28, 16, 20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 8),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _buildNavItem(
-                    context,
-                    index: 0,
-                    icon: Icons.home_outlined,
-                    selectedIcon: Icons.home,
-                    label: 'Home',
-                    isSelected: currentIndex == 0,
-                  ),
-                  _buildScanButton(
-                    context,
-                    isSelected: currentIndex == 1,
-                  ),
-                  _buildNavItem(
-                    context,
-                    index: 2,
-                    icon: Icons.history_outlined,
-                    selectedIcon: Icons.history,
-                    label: 'History',
-                    isSelected: currentIndex == 2,
-                  ),
-                  _buildNavItem(
-                    context,
-                    index: 3,
-                    icon: Icons.badge_outlined,
-                    selectedIcon: Icons.badge,
-                    label: 'Profile',
-                    isSelected: currentIndex == 3,
+                  LegalLensLogo(size: 32, tile: false),
+                  SizedBox(width: 8),
+                  Text(
+                    'LegalLens',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: Colors.white, letterSpacing: -0.4),
                   ),
                 ],
               ),
             ),
+            const SizedBox(height: 36),
+            for (var i = 0; i < _items.length; i++)
+              _SidebarLink(
+                item: _items[i],
+                selected: current == i,
+                onTap: () => navigationShell.goBranch(i, initialLocation: i == current),
+              ),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.07), borderRadius: BorderRadius.circular(18)),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundColor: LL.highlight,
+                    child: Text(
+                      username.isEmpty ? '?' : username[0].toUpperCase(),
+                      style: const TextStyle(color: LL.accent, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          username.isEmpty ? 'Not signed in' : username,
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white),
+                        ),
+                        if (auth.role != null)
+                          Text(_roleLabel(auth.role!), style: const TextStyle(fontSize: 12, color: LL.sidebarText)),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Sign out',
+                    onPressed: () {
+                      context.read<AuthProvider>().logout();
+                      context.go('/login');
+                    },
+                    icon: const Icon(Icons.logout, size: 18, color: LL.sidebarText),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _roleLabel(String role) =>
+      role.isEmpty ? role : role[0].toUpperCase() + role.substring(1).toLowerCase();
+}
+
+class _SidebarLink extends StatelessWidget {
+  final _NavItem item;
+  final bool selected;
+  final VoidCallback onTap;
+  const _SidebarLink({required this.item, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Material(
+        color: selected ? LL.highlight.withValues(alpha: 0.14) : Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          hoverColor: Colors.white.withValues(alpha: 0.06),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            child: Row(
+              children: [
+                Icon(item.icon, size: 19, color: selected ? LL.highlight : LL.sidebarText),
+                const SizedBox(width: 12),
+                Text(
+                  item.label,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: selected ? LL.highlight : LL.sidebarText,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
+}
 
-  Widget _buildNavItem(
-    BuildContext context, {
-    required int index,
-    required IconData icon,
-    required IconData selectedIcon,
-    required String label,
-    required bool isSelected,
-  }) {
-    return GestureDetector(
-      onTap: () => navigationShell.goBranch(index),
-      behavior: HitTestBehavior.opaque,
-      child: SizedBox(
-        width: 64,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              isSelected ? selectedIcon : icon,
-              size: 24,
-              color: isSelected
-                  ? LenseScanTheme.primary
-                  : LenseScanTheme.onSurfaceVariant,
-            ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.33,
-                color: isSelected
-                    ? LenseScanTheme.primary
-                    : LenseScanTheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+class _BottomNav extends StatelessWidget {
+  final StatefulNavigationShell navigationShell;
+  const _BottomNav({required this.navigationShell});
 
-  Widget _buildScanButton(BuildContext context, {required bool isSelected}) {
-    return GestureDetector(
-      onTap: () => navigationShell.goBranch(1),
-      behavior: HitTestBehavior.opaque,
-      child: SizedBox(
-        width: 64,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? LenseScanTheme.primaryContainer
-                    : Colors.transparent,
-                shape: BoxShape.circle,
-                boxShadow: isSelected
-                    ? [
-                        BoxShadow(
-                          color: const Color(0xFF134E4A).withValues(alpha: 0.25),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
+  @override
+  Widget build(BuildContext context) {
+    final current = navigationShell.currentIndex;
+    return Container(
+      color: LL.sidebar,
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 66,
+          child: Row(
+            children: [
+              for (var i = 0; i < _items.length; i++)
+                Expanded(
+                  child: InkWell(
+                    onTap: () => navigationShell.goBranch(i, initialLocation: i == current),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: current == i ? LL.highlight : Colors.transparent,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Icon(_items[i].icon, size: 20, color: current == i ? LL.accent : LL.sidebarText),
                         ),
-                      ]
-                    : null,
-              ),
-              child: Icon(
-                isSelected
-                    ? Icons.qr_code_scanner_rounded
-                    : Icons.qr_code_scanner_outlined,
-                size: 24,
-                color: isSelected
-                    ? LenseScanTheme.onPrimary
-                    : LenseScanTheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              'Scan',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
-                letterSpacing: 0.33,
-                color: isSelected
-                    ? LenseScanTheme.primary
-                    : LenseScanTheme.onSurfaceVariant,
-              ),
-            ),
-          ],
+                        const SizedBox(height: 4),
+                        Text(
+                          _items[i].shortLabel,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: current == i ? Colors.white : LL.sidebarText,
+                            fontWeight: current == i ? FontWeight.w600 : FontWeight.w400,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

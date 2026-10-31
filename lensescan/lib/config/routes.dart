@@ -11,6 +11,7 @@ import '../screens/scanner_screen.dart';
 import '../screens/results_screen.dart';
 import '../screens/history_screen.dart';
 import '../screens/profile_screen.dart';
+import '../screens/ml_benchmarks_screen.dart';
 import '../widgets/app_shell.dart';
 
 /// Application routing configuration.
@@ -44,7 +45,7 @@ class AppRouter {
           builder: (context, state) => const LoginScreen(),
         ),
 
-        // Shell route wrapping the 4 tabbed screens with bottom nav
+        // Shell route wrapping the 5 tabbed screens (responsive: sidebar on web, bottom nav on mobile)
         StatefulShellRoute.indexedStack(
           builder: (context, state, navigationShell) {
             return AppShell(
@@ -77,7 +78,25 @@ class AppRouter {
                 ),
               ],
             ),
-            // Tab 2: History
+            // Tab 2: AI & ML Algorithms (NEW BUTTON)
+            StatefulShellBranch(
+              routes: [
+                GoRoute(
+                  path: '/ml-benchmarks',
+                  name: 'ml-benchmarks',
+                  builder: (context, state) => const MLBenchmarksScreen(),
+                ),
+                GoRoute(
+                  path: '/ml',
+                  redirect: (context, state) => '/ml-benchmarks',
+                ),
+                GoRoute(
+                  path: '/algorithms',
+                  redirect: (context, state) => '/ml-benchmarks',
+                ),
+              ],
+            ),
+            // Tab 3: History
             StatefulShellBranch(
               routes: [
                 GoRoute(
@@ -87,7 +106,7 @@ class AppRouter {
                 ),
               ],
             ),
-            // Tab 3: Profile
+            // Tab 4: Profile
             StatefulShellBranch(
               routes: [
                 GoRoute(

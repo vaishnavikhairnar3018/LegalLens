@@ -97,10 +97,7 @@ def extract_text(
         bottom_right = bbox_points[2]
         bottom_left = bbox_points[3]
 
-        # Calculate font height in pixels (average of left and right side heights)
-        left_height = abs(float(bottom_left[1]) - float(top_left[1]))
-        right_height = abs(float(bottom_right[1]) - float(top_right[1]))
-        font_height_px = (left_height + right_height) / 2.0
+        font_height_px = _letter_height_px(top_left, top_right, bottom_right, bottom_left, sanitized_text)
 
         # Convert pixel height to mm using DPI
         font_height_mm = pixel_to_mm(font_height_px, dpi)
@@ -124,6 +121,27 @@ def extract_text(
 
     logger.info(f"OCR extracted {len(ocr_results)} text regions")
     return ocr_results
+
+
+def _letter_height_px(top_left, top_right, bottom_right, bottom_left, text: str) -> float:
+    """
+    Letter height in pixels from an OCR box.
+
+    Horizontal text: the box height. Sideways text (a line printed along a pack edge) gives a
+    tall, narrow box whose WIDTH is the letter height; using its height would report the line
+    length as a giant letter and could hide a Rule 7(2) font violation. A line is treated as
+    sideways only when it has several characters and the box is clearly taller than wide, so a
+    lone tall character such as "1" keeps its real height.
+    """
+    left_height = abs(float(bottom_left[1]) - float(top_left[1]))
+    right_height = abs(float(bottom_right[1]) - float(top_right[1]))
+    height = (left_height + right_height) / 2.0
+    top_width = abs(float(top_right[0]) - float(top_left[0]))
+    bottom_width = abs(float(bottom_right[0]) - float(bottom_left[0]))
+    width = (top_width + bottom_width) / 2.0
+    if len(text.strip()) >= 3 and height > 1.5 * width:
+        return width
+    return height
 
 
 def pixel_to_mm(pixel_height: float, dpi: int) -> Optional[float]:

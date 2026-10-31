@@ -42,22 +42,24 @@ Under Indian law, every pre-packaged commodity sold across physical retail or e-
 - **Pre-Capture Heuristics:** Real-time feedback for blur (Laplacian variance > 100.0) and glare detection before inspection submission.
 - **Cross-Panel Consistency Service:** Stitches Principal Display Panel (PDP), Manufacturing Panels, and Back Panels to resolve split declarations (e.g., *"See back for MRP"*).
 
-### 2. Optical Scale Recovery & Schedule II Font Verification
+### 2. Optical Scale Recovery & Rule 7 Font Verification
 - **ArUco Marker Calibration:** Metric optical scale recovery ($PPM$ - pixels per millimeter) enables measuring actual physical font height down to tenths of a millimeter.
-- **Schedule II Compliance:** Automatic lookups matching packaging surface area ($A \le 50\,\text{cm}^2$, $50 < A \le 100$, $100 < A \le 500$, $A > 500\,\text{cm}^2$) to minimum permitted numeral/letter heights ($1.0\,\text{mm}$ to $6.0\,\text{mm}$).
+- **Rule 7(2) Font Height:** The officer optionally enters the Principal Display Panel area; the minimum numeral/letter height comes from Rule 7(2) Table-I (GSR 629(E), w.e.f. 01.01.2018): A ≤ 50 cm² → 1.0 mm, ≤ 100 → 1.5 mm, ≤ 500 → 2.5 mm, ≤ 2500 → 4.0 mm, above → 6.0 mm. Applied to every Rule 6 declaration. Without a calibration marker or a PDP area, the result is a manual-review flag, never a violation.
 - **Fail-Safe Placement Geometry:** Automatically identifies curved bottles or skewed packaging. When bounding-box geometry is ambiguous, it flags a *Human Review State* instead of generating false-positive notices.
 
 ### 3. Comprehensive LMPC 2011 Rule Checks
 | Statutory Rule | Declaration Check | Enforced Standard |
 | :--- | :--- | :--- |
-| **Rule 6(1)(a)** | Product Identity / Generic Name | Common name on PDP |
-| **Rule 6(1)(b)** | Net Quantity & Unit Conventions | Metric units (`g`, `kg`, `ml`, `l`); dual-units prohibited |
-| **Rule 6(1)(c)** | Maximum Retail Price (MRP) | Format `MRP ₹ xx.xx (incl. of all taxes)` |
-| **Rule 6(1)(d)** | Month & Year of Manufacture/Packing | Valid `MM/YYYY` or `Month YYYY`; future date rejection |
-| **Rule 6(1)(da)** | Expiry / Best Before | Mandatory for perishables; cross-checked against Mfg Date |
-| **Rule 6(1)(e)** | Manufacturer / Packer Address | Complete postal address with Pin Code |
-| **Rule 6(1)(ea)** | Country of Origin | Prominent origin statement (mandatory for imports) |
-| **Rule 6(1)(f)** | Consumer Care Grievance Details | Contact person, helpline phone, email, full address |
+| **Rule 6(1)(a)** | Manufacturer / Packer / Importer Name & Address | Complete postal address with Pin Code |
+| **Rule 6(1)(aa)** | Country of Origin | Mandatory for imported products |
+| **Rule 6(1)(b)** | Common / Generic Name | Common name on PDP |
+| **Rule 6(1)(c)** | Net Quantity | Standard unit of weight, measure or number |
+| **Rule 6(1)(d)** | Month & Year of Manufacture | Valid `MM/YYYY` or `Month YYYY` |
+| **Rule 6(1)(da)** | Best Before / Use By | Required where the commodity may become unfit for consumption |
+| **Rule 6(1)(e)** | Maximum Retail Price (MRP) | Format `MRP ₹ xx.xx (incl. of all taxes)` |
+| **Rule 6(2)** | Consumer Care Details | Name, address, telephone, e-mail |
+
+Related checks: Rule 6(11) unit sale price, Rule 7(2) font height, Rule 8(1) declarations on the PDP, Rule 12(6) prohibited quantity qualifiers, Rule 13 units. Citations are verified against the Ministry of Consumer Affairs consolidated text of the LMPC Rules 2011 with all amendments.
 
 ### 4. Cryptographic Evidence Chain-of-Custody
 - **Section 65B Indian Evidence Act Admissibility:** SHA-256 cryptographic hashing executed on raw image bytes prior to any processing.
@@ -100,7 +102,7 @@ Under Indian law, every pre-packaged commodity sold across physical retail or e-
 │          COMPUTER VISION             │  │        RULE ENGINE           │
 │  ┌────────────────────────────────┐  │  │  ┌────────────────────────┐  │
 │  │ EasyOCR 1.7 (English + Hindi)  │  │  │  │ 8 LMPC 2011 Rules Engine│  │
-│  │ CLAHE Preprocessing            │  │  │  │ Schedule II Font Math  │  │
+│  │ CLAHE Preprocessing            │  │  │  │ Rule 7 Font Math       │  │
 │  │ ArUco Optical Scale Recovery   │  │  │  │ Proximity & PDP Ratio  │  │
 │  │ Raw Byte SHA-256 Hashing       │  │  │  │ Human Review Fallback  │  │
 │  └────────────────────────────────┘  │  │  └────────────────────────┘  │
@@ -123,8 +125,8 @@ The platform comes pre-seeded with 93 high-resolution labeled products across di
 
 ```
 product/
-├── 01_balaji_gathiya_front_missing_mrp.jpg          [Violation: Rule 6(1)(c)]
-├── 10_ram_bandhu_chakali_back_font_violation.jpg    [Violation: Schedule II Font Height]
+├── 01_balaji_gathiya_front_missing_mrp.jpg          [Violation: Rule 6(1)(e)]
+├── 10_ram_bandhu_chakali_back_font_violation.jpg    [Violation: Rule 7(2) Font Height]
 ├── 11_maggi_pichkoo_sauce_front_compliant.jpg       [Compliant: All 8 Fields Valid]
 ├── 21_ponds_talc_curved_review.jpg                  [Review: Curved Surface Geometry]
 ├── 23_dark_fantasy_bourbon_box_placement.jpg        [Review: Ambiguous PDP Orientation]

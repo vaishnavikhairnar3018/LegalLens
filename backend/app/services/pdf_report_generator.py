@@ -7,6 +7,7 @@ under The Legal Metrology Act, 2009 and LMPC Rules, 2011.
 import io
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
+from xml.sax.saxutils import escape as xml_escape
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.units import inch
@@ -35,9 +36,12 @@ def generate_inspection_pdf(
     non_compliant_fields: int,
     summary: str,
     declarations: List[Dict[str, Any]],
+    photos: Optional[List[Dict[str, Any]]] = None,
+    product_name: Optional[str] = None,
 ) -> bytes:
     """
     Generate an official Ministry of Consumer Affairs Statutory Inspection Notice / Certificate.
+    `photos` lists every photo of a multi-photo product inspection with its evidence hash.
     Returns the PDF content as bytes.
     """
     buffer = io.BytesIO()
@@ -151,6 +155,13 @@ def generate_inspection_pdf(
     # 3. Metadata Table
     meta_data = [
         [
+            Paragraph("<b>Product:</b>", meta_bold),
+            # Officer-entered text: escape so ReportLab does not read it as markup
+            Paragraph(f"<b>{xml_escape(product_name)}</b>" if product_name else "Not recorded", meta_style),
+            Paragraph("", meta_bold),
+            Paragraph("", meta_style),
+        ],
+        [
             Paragraph("<b>Inspection Ref ID:</b>", meta_bold),
             Paragraph(f"<font color='#0B1B3D'><b>{inspection_id}</b></font>", meta_style),
             Paragraph("<b>Inspection Date:</b>", meta_bold),
@@ -199,12 +210,36 @@ def generate_inspection_pdf(
     story.append(meta_table)
     story.append(Spacer(1, 10))
 
+    # 3b. Every photo of a multi-photo product inspection, with its own evidence hash
+    if photos:
+        story.append(Paragraph("<b>EVIDENCE PHOTOS (SHA-256 OF RAW UPLOADED BYTES):</b>", meta_bold))
+        story.append(Spacer(1, 4))
+        photo_rows = [[
+            Paragraph("<b>Photo</b>", table_hdr),
+            Paragraph("<b>40 mm marker</b>", table_hdr),
+            Paragraph("<b>SHA-256</b>", table_hdr),
+        ]]
+        for p in photos:
+            photo_rows.append([
+                Paragraph(str(p.get("filename", "")), table_cell),
+                Paragraph("Yes" if p.get("pixels_per_mm") else "No (text only)", table_cell),
+                Paragraph(f"<font size='6.5' face='Courier'>{p.get('image_hash_sha256', '')}</font>", table_cell),
+            ])
+        photo_table = Table(photo_rows, colWidths=[2.0 * inch, 1.1 * inch, 4.3 * inch])
+        photo_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0B1B3D")),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D5D8DC")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        story.append(photo_table)
+        story.append(Spacer(1, 10))
+
     # 4. Mandatory Declarations Audit Table
     story.append(Paragraph("<b>STATUTORY DECLARATIONS AUDIT (LMPC RULES 2011, RULE 6):</b>", meta_bold))
     story.append(Spacer(1, 4))
 
     headers = [
-        Paragraph("<b>Rule 6(1) Field</b>", table_hdr),
+        Paragraph("<b>Rule 6 Field</b>", table_hdr),
         Paragraph("<b>Detected Value</b>", table_hdr),
         Paragraph("<b>Status</b>", table_hdr),
         Paragraph("<b>Findings / Violations</b>", table_hdr),

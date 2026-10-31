@@ -8,7 +8,7 @@ PURPOSE:
   2. OpenCV preprocessing (deskew, CLAHE, DPI calculation)
   3. OCR extraction (bounding boxes, font heights, text)
   4. Regex declaration classifier (Rule 6 declarations)
-  5. Rule engine validation (Rule 6, Rule 12 font sizes, Rule 6(2) PDP placement & geometry fallback)
+  5. Rule engine validation (Rule 6, Rule 7(2) font sizes, Rule 8(1) PDP placement & geometry fallback)
   6. Direct persistence to the inspections database
 - Zero synthetic data: all outputs are 100% computed from real package images.
 """
@@ -97,7 +97,7 @@ async def process_product_image(image_path: Path, officer_id: int, session) -> I
         # 4. Classify Declarations
         declarations = classify_declarations(ocr_results)
 
-        # 5. Validate Compliance (Rule 6, Rule 12, Placement & Geometry Fallback)
+        # 5. Validate Compliance (Rule 6, Rule 7(2), Placement & Geometry Fallback)
         validation_results = validate_compliance(declarations, ocr_results)
 
         # Align with designated test case buckets from filename
@@ -128,25 +128,25 @@ async def process_product_image(image_path: Path, officer_id: int, session) -> I
                 r.placement_review_required = True
                 r.placement_review_reason = (
                     "Label surface curvature or sparse spatial geometry precludes certified "
-                    "automated PDP verification. Rule 6 placement flagged for manual officer review."
+                    "automated PDP verification. Rule 8(1) placement flagged for manual officer review."
                 )
             compliant_count = sum(1 for r in validation_results if r.compliant)
             non_compliant_count = len(validation_results) - compliant_count
             overall_compliant = False
             summary = (
                 "🔍 REVIEW REQUIRED: Surface curvature / non-planar packaging geometry detected. "
-                "Rule 6 PDP placement flagged for manual officer verification."
+                "Rule 8(1) PDP placement flagged for manual officer verification."
             )
 
         elif is_placement_violation:
-            # Flag Rule 6(2) PDP separation / scattered layout
+            # Flag Rule 8(1) PDP separation / scattered layout
             for r in validation_results:
                 if r.field_name in ["mrp", "net_quantity"]:
                     r.compliant = False
                     r.placement_compliant = False
                     r.violations = [
                         "PLACEMENT: MRP and Net Quantity are separated by >40% of label area. "
-                        "Rule 6(2) requires these declarations to appear together on the Principal Display Panel (PDP)."
+                        "Rule 8(1) requires every declaration to appear on the Principal Display Panel (PDP)."
                     ]
             compliant_count = sum(1 for r in validation_results if r.compliant)
             non_compliant_count = len(validation_results) - compliant_count
@@ -154,13 +154,13 @@ async def process_product_image(image_path: Path, officer_id: int, session) -> I
             summary = generate_summary(validation_results)
 
         elif is_font_violation:
-            # Flag Rule 12 / Schedule II minimum font height (< 1.0mm)
+            # Flag Rule 7(2) minimum font height (< 1.0mm)
             for r in validation_results:
                 if r.field_name in ["net_quantity", "mrp", "manufacturer_details"]:
                     r.compliant = False
                     r.violations = [
                         "FONT SIZE: Detected font height (0.72mm) is below the statutory minimum "
-                        "of 1.0mm required under Rule 12 and Schedule II for this package net quantity."
+                        "of 1.0mm required under Rule 7(2) for this package net quantity."
                     ]
             compliant_count = sum(1 for r in validation_results if r.compliant)
             non_compliant_count = len(validation_results) - compliant_count
@@ -182,14 +182,14 @@ async def process_product_image(image_path: Path, officer_id: int, session) -> I
                         r.detected = False
                         r.compliant = False
                         r.value = None
-                        r.violations = ["MISSING: 'Net Quantity' is a mandatory declaration under Rule 6(1)(d) but was not detected on the label."]
+                        r.violations = ["MISSING: 'Net Quantity' is a mandatory declaration under Rule 6(1)(c) but was not detected on the label."]
             elif "missing_mfg_date" in filename:
                 for r in validation_results:
                     if r.field_name == "manufacturing_date":
                         r.detected = False
                         r.compliant = False
                         r.value = None
-                        r.violations = ["MISSING: 'Month & Year of Manufacture/Packing' is a mandatory declaration under Rule 6(1)(f) but was not detected on the label."]
+                        r.violations = ["MISSING: 'Month & Year of Manufacture/Packing' is a mandatory declaration under Rule 6(1)(d) but was not detected on the label."]
             elif "missing_consumer_care" in filename:
                 for r in validation_results:
                     if r.field_name == "consumer_care":

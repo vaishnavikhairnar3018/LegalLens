@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import init_db, get_db, get_session_factory
-from app.routers import auth, scan, inspections, dashboard
+from app.routers import auth, scan, inspections, dashboard, ml_benchmark
 from app.models.user import User, UserRole
 from app.core.security import get_password_hash, decode_token
 
@@ -105,14 +105,16 @@ async def limit_request_size(request: Request, call_next):
     Middleware to enforce maximum request body size.
     Prevents DoS via oversized uploads.
     """
+    # A product scan carries up to 8 photos, so the whole request may exceed the per-photo limit;
+    # each photo is still checked against MAX_UPLOAD_SIZE_MB in the scan router.
     content_length = request.headers.get("content-length")
     if content_length:
-        if int(content_length) > settings.max_upload_size_bytes:
+        if int(content_length) > settings.max_request_size_bytes:
             return JSONResponse(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 content={
                     "detail": f"Request body too large. "
-                    f"Maximum: {settings.MAX_UPLOAD_SIZE_MB}MB"
+                    f"Maximum: {settings.max_request_size_bytes // (1024 * 1024)}MB"
                 },
             )
     return await call_next(request)
@@ -138,6 +140,7 @@ app.include_router(auth.router, prefix="/api/v1")
 app.include_router(scan.router, prefix="/api/v1")
 app.include_router(inspections.router, prefix="/api/v1")
 app.include_router(dashboard.router, prefix="/api/v1")
+app.include_router(ml_benchmark.router, prefix="/api/v1")
 
 # ── Static Files & Web Dashboard ──
 STATIC_DIR = Path(__file__).parent / "static"
@@ -194,6 +197,28 @@ async def serve_dashboard(
     return HTMLResponse(html_path.read_text(encoding="utf-8"))
 
 
+# ── Root & ML Accuracy Landing Page ──
+@app.get("/", response_class=HTMLResponse, tags=["Web Dashboard"])
+async def root_portal():
+    """
+    Landing portal serving the interactive Machine Learning Model Accuracy Dashboard
+    and LMPC 2011 compliance architecture for viva and evaluation.
+    """
+    ml_html = Path(__file__).resolve().parent.parent.parent / "docs" / "ml_model_accuracy_dashboard.html"
+    if ml_html.exists():
+        return HTMLResponse(ml_html.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>LegalLens AI Backend Active</h1>")
+
+
+@app.get("/ml", response_class=HTMLResponse, tags=["Web Dashboard"])
+async def ml_landing_portal():
+    """Direct route for interactive ML benchmarks and algorithm comparison graphs."""
+    ml_html = Path(__file__).resolve().parent.parent.parent / "docs" / "ml_model_accuracy_dashboard.html"
+    if ml_html.exists():
+        return HTMLResponse(ml_html.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>ML Dashboard not found</h1>", status_code=404)
+
+
 # ── Health Check ──
 @app.get("/health", tags=["System"])
 async def health_check():
@@ -207,30 +232,34 @@ async def health_check():
 
 # ── Helpers ──
 async def _seed_admin_user():
-    """Create a default admin user if no users exist in the database."""
-    from sqlalchemy import select, func
+    """Create or update default system accounts (admin, officer_verma, supervisor_sharma)."""
+    from sqlalchemy import select
 
     factory = get_session_factory()
     async with factory() as session:
-        result = await session.execute(select(func.count(User.id)))
-        count = result.scalar()
-
-        if count == 0:
-            logger.info("No users found. Seeding default admin account...")
-            admin = User(
-                username="admin",
-                full_name="System Administrator",
-                hashed_password=get_password_hash("Admin@123456"),
-                role=UserRole.ADMIN,
-                is_active=True,
-            )
-            session.add(admin)
-            await session.commit()
-            logger.info(
-                "Default admin created: username='admin', password='Admin@123456'"
-            )
-            logger.warning(
-                "⚠️  CHANGE THE DEFAULT ADMIN PASSWORD IMMEDIATELY IN PRODUCTION!"
-            )
-        else:
-            logger.info(f"Found {count} existing user(s). Skipping seed.")
+        accounts = [
+            ("admin", "System Administrator", "Admin@123456", UserRole.ADMIN),
+            ("officer_verma", "Rajesh Verma, Legal Metrology Officer", "officer123", UserRole.OFFICER),
+            ("supervisor_sharma", "Pooja Sharma, Metrology Supervisor", "super123", UserRole.SUPERVISOR),
+        ]
+        for username, full_name, password, role in accounts:
+            result = await session.execute(select(User).where(User.username == username))
+            user = result.scalar_one_or_none()
+            if not user:
+                user = User(
+                    username=username,
+                    full_name=full_name,
+                    hashed_password=get_password_hash(password),
+                    role=role,
+                    is_active=True,
+                )
+                session.add(user)
+                logger.info(f"Seeded default account: {username}")
+            else:
+                user.hashed_password = get_password_hash(password)
+                user.role = role
+                user.is_active = True
+        await session.commit()
+        logger.info(
+            "Default accounts ready: admin (Admin@123456), officer_verma (officer123), supervisor_sharma (super123)"
+        )

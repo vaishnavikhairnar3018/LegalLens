@@ -1,0 +1,371 @@
+{
+  "benchmark_title": "LegalLens Supervised Learning Product Categorization Benchmark",
+  "dataset_name": "Indian Retail Packaging & FMCG Catalog Dataset",
+  "total_samples": 217,
+  "categories_count": 10,
+  "categories_list": [
+    "Beverages & Dairy",
+    "Biscuits & Bakery",
+    "Condiments & Sauces",
+    "Confectionery & Sweets",
+    "Household & Cleaning",
+    "Instant Foods",
+    "Packaged Staples",
+    "Personal Care & Cosmetics",
+    "Ready-to-Cook & Spices",
+    "Savouries & Namkeen"
+  ],
+  "best_model": "Linear SVM",
+  "models_benchmark": [
+    {
+      "model_name": "Linear SVM",
+      "accuracy_pct": 86.36,
+      "precision_pct": 86.82,
+      "recall_pct": 86.36,
+      "f1_score_pct": 85.92,
+      "cv_mean_pct": 82.92,
+      "cv_std_pct": 5.49,
+      "train_time_sec": 0.006,
+      "latency_ms_per_item": 0.0
+    },
+    {
+      "model_name": "Multinomial Naive Bayes",
+      "accuracy_pct": 86.36,
+      "precision_pct": 85.61,
+      "recall_pct": 86.36,
+      "f1_score_pct": 85.2,
+      "cv_mean_pct": 83.38,
+      "cv_std_pct": 4.81,
+      "train_time_sec": 0.005,
+      "latency_ms_per_item": 0.0
+    },
+    {
+      "model_name": "Logistic Regression",
+      "accuracy_pct": 81.82,
+      "precision_pct": 82.71,
+      "recall_pct": 81.82,
+      "f1_score_pct": 80.66,
+      "cv_mean_pct": 83.38,
+      "cv_std_pct": 4.81,
+      "train_time_sec": 0.122,
+      "latency_ms_per_item": 0.0
+    },
+    {
+      "model_name": "k-Nearest Neighbors",
+      "accuracy_pct": 72.73,
+      "precision_pct": 75.25,
+      "recall_pct": 72.73,
+      "f1_score_pct": 71.57,
+      "cv_mean_pct": 75.55,
+      "cv_std_pct": 5.8,
+      "train_time_sec": 0.004,
+      "latency_ms_per_item": 0.0
+    },
+    {
+      "model_name": "Random Forest",
+      "accuracy_pct": 68.18,
+      "precision_pct": 82.54,
+      "recall_pct": 68.18,
+      "f1_score_pct": 67.56,
+      "cv_mean_pct": 73.29,
+      "cv_std_pct": 7.8,
+      "train_time_sec": 0.351,
+      "latency_ms_per_item": 0.37
+    },
+    {
+      "model_name": "Decision Tree",
+      "accuracy_pct": 59.09,
+      "precision_pct": 79.41,
+      "recall_pct": 59.09,
+      "f1_score_pct": 62.25,
+      "cv_mean_pct": 52.04,
+      "cv_std_pct": 5.61,
+      "train_time_sec": 0.016,
+      "latency_ms_per_item": 0.0
+    }
+  ],
+  "confusion_matrix": {
+    "classes": [
+      "Beverages & Dairy",
+      "Biscuits & Bakery",
+      "Condiments & Sauces",
+      "Confectionery & Sweets",
+      "Household & Cleaning",
+      "Instant Foods",
+      "Packaged Staples",
+      "Personal Care & Cosmetics",
+      "Ready-to-Cook & Spices",
+      "Savouries & Namkeen"
+    ],
+    "matrix": [
+      [
+        3,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        4,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
+      [
+        0,
+        0,
+        5,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        3,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        4,
+        0,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        4,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        5,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        4,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        1,
+        0,
+        2,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        4
+      ]
+    ],
+    "normalized": [
+      [
+        0.75,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.25,
+        0.0
+      ],
+      [
+        0.0,
+        0.8,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.2
+      ],
+      [
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.8,
+        0.0,
+        0.0,
+        0.2,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.25,
+        0.0,
+        0.0,
+        0.0,
+        0.25,
+        0.0,
+        0.5,
+        0.0
+      ],
+      [
+        0.0,
+        0.2,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.8
+      ]
+    ]
+  },
+  "sample_predictions": [
+    {
+      "input": "Balaji Papdi Gathiya Namkeen 24g",
+      "predicted": "Savouries & Namkeen"
+    },
+    {
+      "input": "Parle-G Gluco Biscuits 80g",
+      "predicted": "Biscuits & Bakery"
+    },
+    {
+      "input": "Maggi Tomato Pichkoo Ketchup 90g",
+      "predicted": "Condiments & Sauces"
+    },
+    {
+      "input": "Tata Salt Vacuum Evaporated 1kg",
+      "predicted": "Packaged Staples"
+    },
+    {
+      "input": "Dettol Antiseptic Liquid Handwash 200ml",
+      "predicted": "Personal Care & Cosmetics"
+    },
+    {
+      "input": "Surf Excel Easy Wash Detergent 1kg",
+      "predicted": "Household & Cleaning"
+    }
+  ]
+}

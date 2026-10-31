@@ -1,22 +1,21 @@
-/// Scanner screen — camera capture viewfinder with minimal UI.
+/// Scanner screen — live camera viewfinder, then a confirm step before upload.
 ///
-/// Matches Stitch design: 3._camera_scan_viewfinder/code.html
-/// Full-bleed camera preview, corner reticles, shutter button,
-/// gallery import, flash toggle, Label/Barcode mode pill.
+/// Camera preview with frame corners, shutter and photo upload; after capture,
+/// the photo, an optional display panel area, and Retake / Check label.
 library;
 
 import 'package:camera/camera.dart';
+import 'dart:ui' as ui;
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/foundation.dart';
-import 'package:provider/provider.dart';
 
+import '../config/app_config.dart';
 import '../config/theme.dart';
 import '../core/api/api_endpoints.dart';
 import '../core/api/dio_client.dart';
-import '../core/auth/auth_provider.dart';
 import '../core/utils/camera_permission.dart';
 import '../widgets/loading_overlay.dart';
 
@@ -28,17 +27,28 @@ class ScannerScreen extends StatefulWidget {
   State<ScannerScreen> createState() => _ScannerScreenState();
 }
 
-class _ScannerScreenState extends State<ScannerScreen>
-    with SingleTickerProviderStateMixin {
+/// One photo of the product being inspected.
+class _Photo {
+  final Uint8List bytes;
+  final String name;
+  const _Photo(this.bytes, this.name);
+}
+
+class _ScannerScreenState extends State<ScannerScreen> {
   final ImagePicker _picker = ImagePicker();
-  Uint8List? _capturedImageBytes;
-  String? _capturedImageName;
+  // All photos of the current product (e.g. a clean shot and one with the 40 mm marker).
+  final List<_Photo> _photos = [];
+  int _selectedPhoto = 0;
+  // True while the officer is back in the camera to add another photo of the same product.
+  bool _addingMore = false;
   bool _isUploading = false;
   double _uploadProgress = 0.0;
   String? _errorMessage;
   bool _torchOn = false;
-  bool _isLabelMode = true; // true=Label, false=Barcode
-  late AnimationController _pulseController;
+  // Optional Principal Display Panel area (cm²) for the Rule 7(2) font-height minimum
+  final _pdpAreaController = TextEditingController();
+  // Product name as written on the pack; required so records are identifiable
+  final _productNameController = TextEditingController();
 
   // Live camera stream state
   CameraController? _cameraController;
@@ -50,16 +60,13 @@ class _ScannerScreenState extends State<ScannerScreen>
   @override
   void initState() {
     super.initState();
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1500),
-    )..repeat(reverse: true);
     _initCamera();
   }
 
   @override
   void dispose() {
-    _pulseController.dispose();
+    _pdpAreaController.dispose();
+    _productNameController.dispose();
     _cameraController?.dispose();
     super.dispose();
   }
@@ -207,11 +214,7 @@ class _ScannerScreenState extends State<ScannerScreen>
         final XFile photo = await _cameraController!.takePicture();
         final bytes = await photo.readAsBytes();
         if (!mounted) return;
-        setState(() {
-          _capturedImageBytes = bytes;
-          _capturedImageName = photo.name.isNotEmpty ? photo.name : 'label_scan.jpg';
-          _errorMessage = null;
-        });
+        _addPhoto(bytes, photo.name.isNotEmpty ? photo.name : 'label_scan.jpg');
         return;
       } catch (e) {
         setState(() {
@@ -221,27 +224,72 @@ class _ScannerScreenState extends State<ScannerScreen>
       }
     }
 
-    // 2. If camera not initialized, retry live camera start so it runs inside scanner
-    if (!_isCameraInitializing) {
-      await _initCamera();
+    // 2. If camera not ready, open gallery/file picker so shutter button is never dead
+    await _pickFromGallery();
+  }
+
+  Future<void> _loadSampleLabel() async {
+    try {
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder, const Rect.fromLTWH(0, 0, 800, 950));
+      final bgPaint = Paint()..color = const Color(0xFFF8FAFC);
+      canvas.drawRect(const Rect.fromLTWH(0, 0, 800, 950), bgPaint);
+
+      final borderPaint = Paint()
+        ..color = const Color(0xFF1E293B)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3;
+      canvas.drawRect(const Rect.fromLTWH(24, 24, 752, 902), borderPaint);
+
+      void drawText(String text, double x, double y, double fontSize, {bool isBold = false, Color color = const Color(0xFF0F172A)}) {
+        final textPainter = TextPainter(
+          text: TextSpan(
+            text: text,
+            style: TextStyle(
+              fontSize: fontSize,
+              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+              color: color,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        );
+        textPainter.layout();
+        textPainter.paint(canvas, Offset(x, y));
+      }
+
+      drawText('TATA SALT', 50, 60, 36, isBold: true, color: const Color(0xFF1E3A8A));
+      drawText('VACUUM EVAPORATED IODISED SALT', 50, 110, 18, isBold: true);
+      drawText('Net Quantity: 1 kg (1000 g)', 50, 190, 24, isBold: true);
+      drawText('MRP: Rs. 28.00 (Incl. of all taxes)', 50, 240, 24, isBold: true);
+      drawText('Month & Year of Packing: 08/2026', 50, 290, 20);
+      drawText('Batch No.: B-2026/8940-TS', 50, 340, 18);
+      drawText('Manufactured by: Tata Consumer Products Ltd.', 50, 400, 18, isBold: true);
+      drawText('1, Bishop Lefroy Road, Kolkata - 700020', 50, 435, 16);
+      drawText('Country of Origin: India', 50, 485, 18, isBold: true);
+      drawText('Consumer Care: care@tataconsumer.com | 1800-108-4488', 50, 530, 16);
+
+      final picture = recorder.endRecording();
+      final img = await picture.toImage(800, 950);
+      final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
+
+      if (byteData != null) {
+        _addPhoto(byteData.buffer.asUint8List(), 'Tata_Salt_1kg_Sample.png');
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Could not generate sample label: $e';
+      });
     }
   }
 
   Future<void> _captureFromCamera() async {
     try {
-      final XFile? photo = await _picker.pickImage(
-        source: ImageSource.camera,
-        maxWidth: 2048,
-        maxHeight: 2048,
-        imageQuality: 90,
-      );
+      // Send the original photo: the server resizes it once for both the marker scale and OCR,
+      // and hashes the untouched original as evidence. Browser-side resizing blurred small print.
+      final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
       if (photo != null) {
         final bytes = await photo.readAsBytes();
-        setState(() {
-          _capturedImageBytes = bytes;
-          _capturedImageName = photo.name.isNotEmpty ? photo.name : 'label_scan.jpg';
-          _errorMessage = null;
-        });
+        _addPhoto(bytes, photo.name.isNotEmpty ? photo.name : 'label_scan.jpg');
       }
     } catch (e) {
       setState(() {
@@ -252,19 +300,10 @@ class _ScannerScreenState extends State<ScannerScreen>
 
   Future<void> _pickFromGallery() async {
     try {
-      final XFile? photo = await _picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 2048,
-        maxHeight: 2048,
-        imageQuality: 90,
-      );
+      final XFile? photo = await _picker.pickImage(source: ImageSource.gallery);
       if (photo != null) {
         final bytes = await photo.readAsBytes();
-        setState(() {
-          _capturedImageBytes = bytes;
-          _capturedImageName = photo.name.isNotEmpty ? photo.name : 'label_scan.jpg';
-          _errorMessage = null;
-        });
+        _addPhoto(bytes, photo.name.isNotEmpty ? photo.name : 'label_scan.jpg');
       }
     } catch (e) {
       setState(() {
@@ -273,8 +312,44 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
   }
 
+  void _addPhoto(Uint8List bytes, String name) {
+    if (!mounted) return;
+    if (bytes.length > AppConfig.maxUploadSizeBytes) {
+      final mb = (bytes.length / (1024 * 1024)).toStringAsFixed(1);
+      setState(() => _errorMessage = '$name is $mb MB; the limit is ${AppConfig.maxUploadSizeBytes ~/ (1024 * 1024)} MB per photo.');
+      return;
+    }
+    setState(() {
+      _photos.add(_Photo(bytes, name));
+      _selectedPhoto = _photos.length - 1;
+      _addingMore = false;
+      _errorMessage = null;
+    });
+  }
+
+  void _removePhoto(int index) {
+    setState(() {
+      _photos.removeAt(index);
+      _selectedPhoto = _photos.isEmpty ? 0 : _selectedPhoto.clamp(0, _photos.length - 1);
+      _errorMessage = null;
+    });
+  }
+
   Future<void> _uploadAndScan() async {
-    if (_capturedImageBytes == null) return;
+    if (_photos.isEmpty) return;
+
+    final productName = _productNameController.text.trim();
+    if (productName.isEmpty) {
+      setState(() => _errorMessage = 'Enter the product name as printed on the pack.');
+      return;
+    }
+
+    final pdpAreaText = _pdpAreaController.text.trim();
+    final pdpArea = pdpAreaText.isEmpty ? null : double.tryParse(pdpAreaText);
+    if (pdpAreaText.isNotEmpty && (pdpArea == null || pdpArea <= 0)) {
+      setState(() => _errorMessage = 'PDP area must be a positive number in cm².');
+      return;
+    }
 
     setState(() {
       _isUploading = true;
@@ -283,18 +358,22 @@ class _ScannerScreenState extends State<ScannerScreen>
     });
 
     try {
-      final formData = FormData.fromMap({
-        'image': MultipartFile.fromBytes(
-          _capturedImageBytes!,
-          filename: _capturedImageName ?? 'label_scan.jpg',
-        ),
-      });
+      // All photos of this product in one request: the server combines them into one inspection.
+      final formData = FormData();
+      for (final photo in _photos) {
+        formData.files.add(MapEntry('images', MultipartFile.fromBytes(photo.bytes, filename: photo.name)));
+      }
+      formData.fields.add(MapEntry('product_name', productName));
+      if (pdpArea != null) formData.fields.add(MapEntry('pdp_area_cm2', pdpArea.toString()));
 
       final response = await DioClient.instance.dio.post(
-        ApiEndpoints.scan,
+        ApiEndpoints.scanProduct,
         data: formData,
         options: Options(
           contentType: 'multipart/form-data',
+          // OCR on a CPU takes about a minute per photo; the default 60 s receive timeout would abort the scan.
+          sendTimeout: const Duration(minutes: 2),
+          receiveTimeout: const Duration(minutes: 15),
         ),
         onSendProgress: (sent, total) {
           if (total > 0) {
@@ -308,245 +387,140 @@ class _ScannerScreenState extends State<ScannerScreen>
       if (mounted) {
         setState(() {
           _isUploading = false;
-          _capturedImageBytes = null;
-          _capturedImageName = null;
+          _photos.clear();
+          _selectedPhoto = 0;
+          _pdpAreaController.clear();
+          _productNameController.clear();
         });
 
         // Navigate to results screen with the compliance report
         context.push('/results', extra: response.data);
       }
     } on DioException catch (e) {
-      String message;
-      if (e.response != null) {
-        final detail = e.response!.data is Map
-            ? e.response!.data['detail'] ?? 'Unknown error'
-            : 'Unknown error';
-        message = 'Scan failed: $detail';
-      } else if (e.type == DioExceptionType.connectionTimeout) {
-        message = 'Connection timed out. Please check your network.';
-      } else {
-        message = 'Network error. Please try again.';
+      // Never substitute a result: the captured image is kept so the officer can retry.
+      debugPrint('Scan upload failed: ${e.type} ${e.response?.statusCode} ${e.message}');
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+          _errorMessage = _scanErrorMessage(e);
+        });
       }
-      setState(() {
-        _isUploading = false;
-        _errorMessage = message;
-      });
     } catch (e) {
-      setState(() {
-        _isUploading = false;
-        _errorMessage = 'An unexpected error occurred.';
-      });
+      debugPrint('Scan failed: $e');
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+          _errorMessage = 'Scan failed. Please try again.';
+        });
+      }
     }
   }
 
-  void _clearImage() {
+  String _scanErrorMessage(DioException e) {
+    switch (e.type) {
+      case DioExceptionType.connectionError:
+      case DioExceptionType.connectionTimeout:
+      case DioExceptionType.sendTimeout:
+      case DioExceptionType.receiveTimeout:
+        return 'Cannot reach the server. Check the connection and try again.';
+      default:
+        break;
+    }
+    final status = e.response?.statusCode;
+    if (status == 401) return 'Session expired. Please sign in again.';
+    if (status == 403) return 'Your account is not allowed to scan.';
+    final detail = e.response?.data is Map ? (e.response!.data as Map)['detail'] : null;
+    if (detail is String && detail.isNotEmpty) return detail;
+    return 'Scan failed${status != null ? ' ($status)' : ''}. Please try again.';
+  }
+
+  void _clearAll() {
     setState(() {
-      _capturedImageBytes = null;
-      _capturedImageName = null;
+      _photos.clear();
+      _selectedPhoto = 0;
+      _addingMore = false;
       _errorMessage = null;
     });
   }
+
+  bool get _reviewing => _photos.isNotEmpty && !_addingMore;
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       children: [
         Scaffold(
-          extendBodyBehindAppBar: true,
-          appBar: _capturedImageBytes == null ? _buildViewfinderAppBar() : null,
-          body: _capturedImageBytes != null
-              ? _buildImagePreview()
-              : _buildViewfinder(),
+          backgroundColor: _reviewing ? LL.paper : _cameraBg,
+          body: _reviewing ? _buildImagePreview() : _buildViewfinder(),
         ),
-
-        // Upload loading overlay
-        if (_isUploading)
-          LoadingOverlay(
-            message: 'Analyzing label...',
-            progress: _uploadProgress,
-          ),
+        if (_isUploading) LoadingOverlay(progress: _uploadProgress),
       ],
     );
   }
 
-  PreferredSizeWidget _buildViewfinderAppBar() {
-    final auth = context.watch<AuthProvider>();
-    final username = auth.username ?? 'Officer';
-    return AppBar(
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      leading: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Container(
-          decoration: BoxDecoration(
-            color: LenseScanTheme.surfaceContainerLowest.withValues(alpha: 0.9),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.verified_user_rounded, size: 18, color: LenseScanTheme.primary),
-              const SizedBox(width: 4),
-              const Text(
-                'LegalLens AI',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: LenseScanTheme.primary,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-      leadingWidth: 140,
-      actions: [
-        // Profile avatar
-        Padding(
-          padding: const EdgeInsets.only(right: 12),
-          child: CircleAvatar(
-            radius: 16,
-            backgroundColor: LenseScanTheme.surfaceContainerHigh,
-            child: Text(
-              username.isNotEmpty ? username[0].toUpperCase() : 'O',
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: LenseScanTheme.primary,
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
+  static const _cameraBg = Color(0xFF15171C);
 
+  // ── Live camera ──
   Widget _buildViewfinder() {
-    return Container(
-      color: LenseScanTheme.onSurface,
-      child: SafeArea(
-        top: false,
-        child: Column(
-          children: [
-            // Full-bleed camera area
-            Expanded(
-              child: Stack(
-                children: [
-                  // Live Camera Stream Preview
-                  _buildLiveCameraView(),
-
-                  // Scrim gradients
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              LenseScanTheme.inverseSurface.withValues(alpha: 0.7),
-                              Colors.transparent,
-                              Colors.transparent,
-                              LenseScanTheme.inverseSurface.withValues(alpha: 0.8),
-                            ],
-                            stops: const [0.0, 0.2, 0.7, 1.0],
-                          ),
-                        ),
-                      ),
-                    ),
+    return SafeArea(
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 12, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _addingMore ? 'Photo ${_photos.length + 1} of this product' : 'Scan a label',
+                    style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w500),
                   ),
-
-                  // Top toolbar: switch camera + torch
-                  Positioned(
-                    top: MediaQuery.of(context).padding.top + 8,
-                    left: 16,
-                    right: 16,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        if (_availableCameras.length > 1)
-                          _buildCircleButton(
-                            icon: Icons.flip_camera_ios_rounded,
-                            selected: false,
-                            onTap: _switchCamera,
-                          )
-                        else
-                          const SizedBox(width: 44),
-                        // Flash toggle
-                        _buildCircleButton(
-                          icon: _torchOn ? Icons.flash_on : Icons.flash_off,
-                          selected: _torchOn,
-                          onTap: _toggleTorch,
-                        ),
-                      ],
-                    ),
+                ),
+                if (_addingMore)
+                  TextButton(
+                    onPressed: () => setState(() => _addingMore = false),
+                    style: TextButton.styleFrom(foregroundColor: Colors.white),
+                    child: Text('Back to ${_photos.length} photo${_photos.length == 1 ? '' : 's'}'),
                   ),
-
-                  // Center: Viewfinder reticle
-                  Center(
-                    child: _buildReticle(),
+                if (_isCameraInitialized && _availableCameras.length > 1)
+                  _buildIconButton(icon: Icons.flip_camera_android_outlined, tooltip: 'Switch camera', onTap: _switchCamera),
+                if (_isCameraInitialized)
+                  _buildIconButton(
+                    icon: _torchOn ? Icons.flash_on : Icons.flash_off,
+                    tooltip: _torchOn ? 'Torch off' : 'Torch on',
+                    onTap: _toggleTorch,
                   ),
-
-                  // Error message overlay
-                  if (_errorMessage != null)
-                    Positioned(
-                      bottom: 180,
-                      left: 20,
-                      right: 20,
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: LenseScanTheme.errorContainer,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.error_outline,
-                                color: LenseScanTheme.error, size: 18),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _errorMessage!,
-                                style: const TextStyle(
-                                  color: LenseScanTheme.onErrorContainer,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+              ],
             ),
-
-            // Bottom capture console
-            Container(
-              color: LenseScanTheme.onSurface.withValues(alpha: 0.95),
-              padding: const EdgeInsets.only(top: 16, bottom: 20),
-              child: Column(
-                children: [
-                  // Mode toggle pill: Label / Barcode
-                  _buildModeToggle(),
-                  const SizedBox(height: 20),
-
-                  // Shutter row: gallery + shutter
-                  _buildShutterRow(),
-                ],
-              ),
+          ),
+          Expanded(
+            child: Stack(
+              children: [
+                _buildLiveCameraView(),
+                if (_isCameraInitialized) Center(child: IgnorePointer(child: _buildReticle())),
+                if (_isCameraInitialized)
+                  const Positioned(
+                    left: 24,
+                    right: 24,
+                    bottom: 16,
+                    child: Text(
+                      'Fit the label and the 40 mm marker inside the frame',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white70, fontSize: 13),
+                    ),
+                  ),
+                if (_errorMessage != null)
+                  Positioned(left: 16, right: 16, bottom: 16, child: _buildErrorNote(dark: true)),
+              ],
             ),
-          ],
-        ),
+          ),
+          _buildShutterRow(),
+        ],
       ),
     );
   }
 
   Widget _buildLiveCameraView() {
-    if (_isCameraInitialized &&
-        _cameraController != null &&
-        _cameraController!.value.isInitialized) {
+    if (_isCameraInitialized && _cameraController != null && _cameraController!.value.isInitialized) {
       return GestureDetector(
         onTap: _handleShutterCapture,
         behavior: HitTestBehavior.opaque,
@@ -558,12 +532,7 @@ class _ScannerScreenState extends State<ScannerScreen>
               if (scale < 1) scale = 1 / scale;
               return ClipRect(
                 child: Center(
-                  child: Transform.scale(
-                    scale: scale,
-                    child: Center(
-                      child: CameraPreview(_cameraController!),
-                    ),
-                  ),
+                  child: Transform.scale(scale: scale, child: Center(child: CameraPreview(_cameraController!))),
                 ),
               );
             },
@@ -573,409 +542,358 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
 
     if (_isCameraInitializing) {
-      return Container(
-        width: double.infinity,
-        height: double.infinity,
-        color: const Color(0xFF10141D),
-        child: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: 36,
-                height: 36,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
-                  color: LenseScanTheme.primary,
-                ),
-              ),
-              SizedBox(height: 16),
-              Text(
-                'Starting live camera in scanner...',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70)),
+            SizedBox(height: 14),
+            Text('Starting camera…', style: TextStyle(color: Colors.white70, fontSize: 13)),
+          ],
         ),
       );
     }
 
-    // Camera not available or permission denied
-    return Container(
-      width: double.infinity,
-      height: double.infinity,
-      color: const Color(0xFF10141D),
-      padding: const EdgeInsets.symmetric(horizontal: 28),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.videocam_off_outlined,
-              size: 48,
-              color: Colors.white.withValues(alpha: 0.35),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              _cameraErrorMessage ?? 'Live camera stream not active',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.85),
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
+    // Camera unavailable: offer the other ways in.
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.no_photography_outlined, size: 32, color: Colors.white38),
+              const SizedBox(height: 14),
+              const Text('Camera isn\'t available', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500)),
+              const SizedBox(height: 6),
+              Text(
+                _cameraErrorMessage ?? 'Allow camera access, or upload a photo of the label.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white60, fontSize: 13, height: 1.4),
               ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: _initCamera,
-              icon: const Icon(Icons.refresh_rounded, size: 16),
-              label: const Text('Allow & Start Live Camera'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: LenseScanTheme.surfaceContainerLowest,
-                foregroundColor: LenseScanTheme.primary,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextButton.icon(
-              onPressed: _captureFromCamera,
-              icon: Icon(Icons.camera_alt_outlined, size: 14, color: Colors.white.withValues(alpha: 0.45)),
-              label: Text(
-                'Use phone camera app instead',
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.45),
-                  fontSize: 11,
+              const SizedBox(height: 22),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _pickFromGallery,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: LL.text,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  icon: const Icon(Icons.upload_outlined, size: 18),
+                  label: const Text('Upload a photo', style: TextStyle(fontSize: 14)),
                 ),
               ),
-            ),
-          ],
+              const SizedBox(height: 8),
+              Wrap(
+                alignment: WrapAlignment.center,
+                children: [
+                  _buildQuietLink('Try camera again', _initCamera),
+                  _buildQuietLink('Phone camera app', _captureFromCamera),
+                  _buildQuietLink('Use a sample label', _loadSampleLabel),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildCircleButton({
-    required IconData icon,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: selected
-              ? LenseScanTheme.secondaryFixed
-              : LenseScanTheme.inverseSurface.withValues(alpha: 0.6),
-        ),
-        child: Icon(
-          icon,
-          size: 22,
-          color: selected ? LenseScanTheme.primary : Colors.white,
-        ),
-      ),
+  Widget _buildQuietLink(String label, VoidCallback onTap) {
+    return TextButton(
+      onPressed: onTap,
+      style: TextButton.styleFrom(foregroundColor: Colors.white70),
+      child: Text(label, style: const TextStyle(fontSize: 13)),
     );
+  }
+
+  Widget _buildIconButton({required IconData icon, required String tooltip, required VoidCallback onTap}) {
+    return IconButton(tooltip: tooltip, onPressed: onTap, icon: Icon(icon, color: Colors.white, size: 22));
   }
 
   Widget _buildReticle() {
+    const side = BorderSide(color: Colors.white, width: 2);
+    Widget corner({required bool top, required bool left}) => Positioned(
+          top: top ? 0 : null,
+          bottom: top ? null : 0,
+          left: left ? 0 : null,
+          right: left ? null : 0,
+          child: Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              border: Border(
+                top: top ? side : BorderSide.none,
+                bottom: top ? BorderSide.none : side,
+                left: left ? side : BorderSide.none,
+                right: left ? BorderSide.none : side,
+              ),
+            ),
+          ),
+        );
     return SizedBox(
-      width: 240,
-      height: 320,
+      width: 260,
+      height: 340,
       child: Stack(
         children: [
-          // Corner reticles
-          _buildCorner(Alignment.topLeft, BorderRadius.only(topLeft: Radius.circular(16))),
-          _buildCorner(Alignment.topRight, BorderRadius.only(topRight: Radius.circular(16))),
-          _buildCorner(Alignment.bottomLeft, BorderRadius.only(bottomLeft: Radius.circular(16))),
-          _buildCorner(Alignment.bottomRight, BorderRadius.only(bottomRight: Radius.circular(16))),
+          corner(top: true, left: true),
+          corner(top: true, left: false),
+          corner(top: false, left: true),
+          corner(top: false, left: false),
         ],
-      ),
-    );
-  }
-
-  Widget _buildCorner(Alignment alignment, BorderRadius borderRadius) {
-    final isTop = alignment == Alignment.topLeft || alignment == Alignment.topRight;
-    final isLeft = alignment == Alignment.topLeft || alignment == Alignment.bottomLeft;
-
-    return Positioned(
-      top: isTop ? 0 : null,
-      bottom: isTop ? null : 0,
-      left: isLeft ? 0 : null,
-      right: isLeft ? null : 0,
-      child: Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          border: Border(
-            top: isTop ? BorderSide(color: LenseScanTheme.secondaryFixed, width: 2) : BorderSide.none,
-            bottom: isTop ? BorderSide.none : BorderSide(color: LenseScanTheme.secondaryFixed, width: 2),
-            left: isLeft ? BorderSide(color: LenseScanTheme.secondaryFixed, width: 2) : BorderSide.none,
-            right: isLeft ? BorderSide.none : BorderSide(color: LenseScanTheme.secondaryFixed, width: 2),
-          ),
-          borderRadius: borderRadius,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildModeToggle() {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: LenseScanTheme.inverseSurface.withValues(alpha: 0.75),
-        borderRadius: BorderRadius.circular(9999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildModePill('Label', _isLabelMode, () {
-            setState(() => _isLabelMode = true);
-          }),
-          _buildModePill('Barcode', !_isLabelMode, () {
-            setState(() => _isLabelMode = false);
-          }),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildModePill(String label, bool active, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-        decoration: BoxDecoration(
-          color: active ? LenseScanTheme.surface : Colors.transparent,
-          borderRadius: BorderRadius.circular(9999),
-          boxShadow: active
-              ? [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 4)]
-              : null,
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-            letterSpacing: 0.12,
-            color: active ? LenseScanTheme.primary : LenseScanTheme.surfaceDim,
-          ),
-        ),
       ),
     );
   }
 
   Widget _buildShutterRow() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.fromLTRB(28, 16, 28, 20),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Gallery picker
-          GestureDetector(
-            onTap: _pickFromGallery,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: LenseScanTheme.inverseSurface.withValues(alpha: 0.65),
-              ),
-              child: const Icon(
-                Icons.photo_library_outlined,
-                size: 22,
-                color: Colors.white,
-              ),
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: _buildIconButton(icon: Icons.photo_library_outlined, tooltip: 'Upload a photo', onTap: _pickFromGallery),
             ),
           ),
-
-          const SizedBox(width: 32),
-
-          // Shutter button
-          GestureDetector(
-            onTap: _handleShutterCapture,
-            child: Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.8),
-                  width: 4,
-                ),
-              ),
-              padding: const EdgeInsets.all(4),
+          Semantics(
+            button: true,
+            label: 'Take photo',
+            child: GestureDetector(
+              onTap: _handleShutterCapture,
               child: Container(
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.white,
-                ),
+                width: 68,
+                height: 68,
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3)),
+                child: const DecoratedBox(decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white)),
               ),
             ),
           ),
-
-          // Spacer to balance gallery button
-          const SizedBox(width: 76),
+          const Expanded(child: SizedBox()),
         ],
       ),
     );
   }
 
-  Widget _buildImagePreview() {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            // Image preview
-            Expanded(
-              child: Container(
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: LenseScanTheme.surfaceContainerLowest,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: LenseScanTheme.outlineVariant.withValues(alpha: 0.3),
-                  ),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(15),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      Image.memory(
-                        _capturedImageBytes!,
-                        fit: BoxFit.contain,
-                      ),
-                      // Top overlay bar
-                      Positioned(
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                Colors.black.withValues(alpha: 0.5),
-                                Colors.transparent,
-                              ],
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.check_circle,
-                                  color: LenseScanTheme.secondaryFixed, size: 18),
-                              const SizedBox(width: 8),
-                              const Text(
-                                'Image captured',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w500,
-                                  fontSize: 13,
-                                ),
-                              ),
-                              const Spacer(),
-                              GestureDetector(
-                                onTap: _clearImage,
-                                child: Container(
-                                  padding: const EdgeInsets.all(6),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.2),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: const Icon(
-                                    Icons.close,
-                                    color: Colors.white,
-                                    size: 18,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
+  Widget _buildErrorNote({required bool dark}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: dark ? const Color(0xFF2A1715) : LL.surface,
+        border: Border.all(color: LL.danger.withValues(alpha: dark ? 0.7 : 0.4)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        _errorMessage!,
+        style: TextStyle(fontSize: 13, height: 1.4, color: dark ? const Color(0xFFF4B4AE) : LL.danger),
+      ),
+    );
+  }
 
-            // Error message
-            if (_errorMessage != null) ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: LenseScanTheme.errorContainer.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
+  // ── Captured photo: confirm and send ──
+  Widget _buildImagePreview() {
+    final wide = MediaQuery.of(context).size.width >= 840;
+    return SafeArea(
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(wide ? 32 : 16, 16, wide ? 32 : 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
                   children: [
-                    const Icon(Icons.error_outline,
-                        color: LenseScanTheme.error, size: 18),
-                    const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        _errorMessage!,
-                        style: const TextStyle(
-                          color: LenseScanTheme.error,
-                          fontSize: 13,
+                        _photos.length == 1 ? 'Check the photo' : '${_photos.length} photos of this product',
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: LL.text),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Discard all photos',
+                      onPressed: _isUploading ? null : _clearAll,
+                      icon: const Icon(Icons.close, color: LL.muted),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: LL.surface,
+                      border: Border.all(color: LL.line),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Image.memory(_photos[_selectedPhoto].bytes, fit: BoxFit.contain),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _buildPhotoStrip(),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _productNameController,
+                  enabled: !_isUploading,
+                  maxLength: 200,
+                  textCapitalization: TextCapitalization.words,
+                  style: const TextStyle(fontSize: 15, color: LL.text),
+                  onChanged: (_) {
+                    if (_errorMessage != null) setState(() => _errorMessage = null);
+                  },
+                  decoration: InputDecoration(
+                    labelText: 'Product name',
+                    hintText: 'Everest Shahi Paneer Masala 12 g',
+                    counterText: '',
+                    isDense: true,
+                    filled: true,
+                    fillColor: LL.surface,
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: LL.line),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: LL.accent),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _pdpAreaController,
+                  enabled: !_isUploading,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  style: const TextStyle(fontSize: 15, color: LL.text),
+                  decoration: InputDecoration(
+                    labelText: 'Display panel area (optional)',
+                    helperText: 'Front face height × width. Sets the Rule 7(2) minimum font size.',
+                    helperMaxLines: 2,
+                    suffixText: 'cm²',
+                    isDense: true,
+                    filled: true,
+                    fillColor: LL.surface,
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: LL.line),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: LL.accent),
+                    ),
+                  ),
+                ),
+                if (_errorMessage != null) ...[
+                  const SizedBox(height: 12),
+                  _buildErrorNote(dark: false),
+                ],
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _isUploading || _photos.length >= _maxPhotos
+                            ? null
+                            : () => setState(() {
+                                  _addingMore = true;
+                                  _errorMessage = null;
+                                }),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: LL.text,
+                          backgroundColor: LL.surface,
+                          side: const BorderSide(color: LL.line),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        icon: const Icon(Icons.add_a_photo_outlined, size: 18),
+                        label: const Text('Add photo', style: TextStyle(fontSize: 14)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 2,
+                      child: FilledButton(
+                        onPressed: _isUploading ? null : _uploadAndScan,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: LL.accent,
+                          foregroundColor: LL.onAccent,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        child: Text(
+                          _photos.length == 1 ? 'Check label' : 'Check product',
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
                         ),
                       ),
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 12),
-            ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
-            // Action buttons
-            Row(
-              children: [
-                Expanded(
-                  child: SizedBox(
-                    height: 48,
-                    child: OutlinedButton.icon(
-                      onPressed: _captureFromCamera,
-                      icon: const Icon(Icons.camera_alt_rounded, size: 18),
-                      label: const Text('Retake'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: LenseScanTheme.onSurface,
-                        backgroundColor: LenseScanTheme.surfaceContainerHigh,
-                        side: BorderSide.none,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+  // Matches MAX_PRODUCT_PHOTOS on the server.
+  static const _maxPhotos = 8;
+
+  /// Thumbnails of every photo of this product; tap to view, × to remove.
+  Widget _buildPhotoStrip() {
+    return SizedBox(
+      height: 64,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _photos.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, i) {
+          final selected = i == _selectedPhoto;
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              GestureDetector(
+                onTap: () => setState(() => _selectedPhoto = i),
+                child: Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: selected ? LL.accent : LL.line, width: selected ? 2 : 1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Image.memory(_photos[i].bytes, fit: BoxFit.cover),
+                ),
+              ),
+              if (!_isUploading)
+                Positioned(
+                  top: -6,
+                  right: -6,
+                  child: Semantics(
+                    button: true,
+                    label: 'Remove photo ${i + 1}',
+                    child: GestureDetector(
+                      onTap: () => _removePhoto(i),
+                      child: Container(
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          color: LL.surface,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: LL.line),
                         ),
+                        child: const Icon(Icons.close, size: 12, color: LL.muted),
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  flex: 2,
-                  child: SizedBox(
-                    height: 48,
-                    child: ElevatedButton.icon(
-                      onPressed: _isUploading ? null : _uploadAndScan,
-                      icon: const Icon(Icons.document_scanner_rounded, size: 18),
-                      label: const Text('Scan'),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
+            ],
+          );
+        },
       ),
     );
   }

@@ -20,7 +20,10 @@ import urllib.error
 from urllib.parse import urlparse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-BACKEND_TARGET = "http://127.0.0.1:8000"
+# Backend to forward /api/ to. Override: --backend http://127.0.0.1:8001  (or env LEGALLENS_BACKEND)
+BACKEND_TARGET = os.environ.get("LEGALLENS_BACKEND", "http://127.0.0.1:8000")
+if "--backend" in sys.argv:
+    BACKEND_TARGET = sys.argv[sys.argv.index("--backend") + 1]
 PROXY_PORT = 8443
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 WEB_DIR = os.path.join(BASE_DIR, "lensescan", "build", "web")
@@ -122,7 +125,8 @@ class LenseScanHandler(BaseHTTPRequestHandler):
                 req.add_header(k, v)
 
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            # A multi-photo scan runs OCR on every photo and can take several minutes on a CPU.
+            with urllib.request.urlopen(req, timeout=900) as resp:
                 self.send_response(resp.status)
                 for header, val in resp.getheaders():
                     if header.lower() not in ("transfer-encoding", "content-length", "connection"):
@@ -186,8 +190,9 @@ class LenseScanHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(content)))
-            # Do not cache index.html, cache hashed assets
-            if target_path.endswith("index.html"):
+            # Flutter's main.dart.js and flutter_bootstrap.js keep the same names across builds,
+            # so caching them would keep phones on an old build. Fonts and images are safe to cache.
+            if target_path.endswith((".html", ".js", ".json", ".wasm")):
                 self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             else:
                 self.send_header("Cache-Control", "public, max-age=3600")

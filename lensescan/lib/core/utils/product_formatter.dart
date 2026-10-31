@@ -2,8 +2,22 @@
 /// Formats raw dataset filenames into clean, professional product names.
 library;
 
+/// Display name for an inspection record: the officer-entered product name when present,
+/// otherwise a name derived from the photo file name (older records).
+String inspectionDisplayName(Map<String, dynamic> insp, {int maxLength = 28}) {
+  final entered = (insp['product_name'] as String?)?.trim();
+  if (entered != null && entered.isNotEmpty) return entered;
+  return formatProductName(insp['image_filename'] as String?, maxLength: maxLength);
+}
+
 String formatProductName(String? filename, {int maxLength = 28}) {
   if (filename == null || filename.isEmpty) return 'Packaged Commodity';
+
+  // Multi-photo product inspections store the photo names comma-separated.
+  if (filename.contains(', ')) {
+    final count = filename.split(', ').length;
+    return 'Product inspection · $count photos';
+  }
 
   final lower = filename.toLowerCase();
 

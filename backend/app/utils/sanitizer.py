@@ -108,6 +108,15 @@ def sanitize_filename(filename: str) -> str:
     return f"{name}{ext}" if ext else name
 
 
+def clean_product_name(name: Optional[str], max_length: int = 200) -> Optional[str]:
+    """Officer-entered product name: drop control characters, collapse whitespace, trim. None if empty."""
+    if not name:
+        return None
+    cleaned = re.sub(r"[\x00-\x1f\x7f]", " ", name)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned[:max_length] or None
+
+
 def validate_image_content(file_bytes: bytes) -> Optional[str]:
     """
     Validate that file content matches an allowed image type by checking magic bytes.

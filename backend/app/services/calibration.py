@@ -52,7 +52,7 @@ class PreCaptureQuality:
 @dataclass
 class CalibrationResult:
     """Physical scale recovery metrics and reference provenance."""
-    calibration_method: str = "none"  # "aruco_40mm" | "coin_26mm" | "card_85x54mm" | "none"
+    calibration_method: str = "none"  # "aruco_40mm" | "none"
     reference_size_mm: Optional[float] = None
     detected_reference_px: Optional[float] = None
     pixels_per_mm: Optional[float] = None
@@ -126,7 +126,7 @@ def calibrate_image(
     Primary physical calibration routine:
     1. Preprocesses image to grayscale.
     2. Detects ArUco marker (40mm default).
-    3. If no ArUco, checks fallbacks (₹10 coin, Standard Card).
+    3. If no ArUco marker, the photo is uncalibrated (text only; no millimetre scale).
     4. Evaluates quality gate (blur and targeted glare).
     5. Returns CalibrationResult with exact pixels_per_mm or None.
     """
@@ -174,35 +174,9 @@ def calibrate_image(
             notes=notes,
         )
 
-    # ── Method 2: Standard ID Card Fallback (85.60 x 53.98 mm) ──
-    card_res = _detect_id_card(gray)
-    if card_res is not None:
-        quality = check_pre_capture_quality(gray, None)
-        return CalibrationResult(
-            calibration_method="card_85x54mm",
-            reference_size_mm=CARD_WIDTH_MM,
-            detected_reference_px=round(card_res["pixel_width"], 2),
-            pixels_per_mm=round(card_res["ppm"], 4),
-            calibration_confidence=0.85,
-            calibration_status="calibrated",
-            quality_gate=quality,
-            notes=["Calibrated via standard ISO ID/debit card reference."],
-        )
-
-    # ── Method 3: ₹10 Coin Fallback (26.0mm) ──
-    coin_res = _detect_coin_reference(gray)
-    if coin_res is not None:
-        quality = check_pre_capture_quality(gray, None)
-        return CalibrationResult(
-            calibration_method="coin_26mm",
-            reference_size_mm=COIN_10RS_DIAMETER_MM,
-            detected_reference_px=round(coin_res["pixel_diameter"], 2),
-            pixels_per_mm=round(coin_res["ppm"], 4),
-            calibration_confidence=0.75,
-            calibration_status="calibrated",
-            quality_gate=quality,
-            notes=["Calibrated via standard 26mm coin circular reference."],
-        )
+    # The ID-card and ₹10-coin fallbacks (_detect_id_card / _detect_coin_reference) are
+    # deliberately NOT used: on real pack photos they matched round or rectangular label
+    # art and produced invented scales. Only the ArUco marker is trusted for millimetres.
 
     # ── No Reference Detected: NEVER GUESS A FIXED DPI ──
     quality = check_pre_capture_quality(gray, None)

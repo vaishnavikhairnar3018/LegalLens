@@ -1,644 +1,292 @@
-/// Profile screen — officer info, stats, settings, and sign-out.
-///
-/// Matches Stitch design export: 7._officer_profile_screen/code.html
+/// Profile screen — the signed-in officer, their own inspection totals, and an LMPC quick
+/// reference. Account details come from /auth/me and totals from /dashboard/summary
+/// (scoped to the officer by the server). Citations match the Ministry's consolidated text of
+/// the Legal Metrology (Packaged Commodities) Rules, 2011 with all amendments.
 library;
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../config/app_config.dart';
 import '../config/theme.dart';
+import '../core/api/api_endpoints.dart';
+import '../core/api/dio_client.dart';
 import '../core/auth/auth_provider.dart';
 
-/// Officer profile screen with stats, settings list, and sign-out.
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
   @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+/// Rule → what must be declared. Kept to the citations verified against the gazette text.
+const _lmpcReference = [
+  ('Rule 6(1)(a)', 'Name and address of the manufacturer, packer or importer'),
+  ('Rule 6(1)(aa)', 'Country of origin, for imported products'),
+  ('Rule 6(1)(b)', 'Common or generic name of the commodity'),
+  ('Rule 6(1)(c)', 'Net quantity in a standard unit of weight, measure or number'),
+  ('Rule 6(1)(d)', 'Month and year of manufacture'),
+  ('Rule 6(1)(da)', 'Best before / use by date, where the commodity can become unfit'),
+  ('Rule 6(1)(e)', 'Maximum retail price, inclusive of all taxes'),
+  ('Rule 6(2)', 'Consumer care: name, address, telephone and e-mail'),
+  ('Rule 6(11)', 'Unit sale price'),
+  ('Rule 8(1)', 'Every declaration on the principal display panel'),
+];
+
+/// Rule 7(2) Table-I: minimum height of numerals and letters by PDP area.
+const _fontTable = [
+  ('up to 50 cm²', '1.0 mm'),
+  ('50 – 100 cm²', '1.5 mm'),
+  ('100 – 500 cm²', '2.5 mm'),
+  ('500 – 2500 cm²', '4.0 mm'),
+  ('above 2500 cm²', '6.0 mm'),
+];
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  bool _loading = true;
+  String? _error;
+  Map<String, dynamic>? _me;
+  Map<String, dynamic>? _summary;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final dio = DioClient.instance.dio;
+      final results = await Future.wait([dio.get(ApiEndpoints.me), dio.get(ApiEndpoints.dashboardSummary)]);
+      if (!mounted) return;
+      setState(() {
+        _me = results[0].data as Map<String, dynamic>;
+        _summary = results[1].data as Map<String, dynamic>;
+        _loading = false;
+      });
+    } on DioException catch (e) {
+      debugPrint('Profile load failed: ${e.type} ${e.response?.statusCode}');
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e.response?.statusCode == 401 ? 'Your session expired. Sign in again.' : 'Couldn\'t reach the server.';
+      });
+    }
+  }
+
+  void _signOut() {
+    context.read<AuthProvider>().logout();
+    context.go('/login');
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final wide = MediaQuery.of(context).size.width >= 840;
+    final pad = wide ? 32.0 : 16.0;
+
+    Widget body;
+    if (_loading) {
+      body = const Padding(
+        padding: EdgeInsets.symmetric(vertical: 64),
+        child: Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: LL.accent))),
+      );
+    } else if (_error != null) {
+      body = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+        decoration: LL.card(),
+        child: Column(children: [
+          Text(_error!, textAlign: TextAlign.center, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: LL.text)),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: _load,
+            style: FilledButton.styleFrom(backgroundColor: LL.accent, foregroundColor: LL.onAccent, shape: const StadiumBorder()),
+            child: const Text('Try again'),
+          ),
+        ]),
+      );
+    } else {
+      body = LayoutBuilder(builder: (context, c) {
+        final twoUp = c.maxWidth >= 900;
+        final left = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          _accountCard(),
+          const SizedBox(height: 16),
+          _statsCard(),
+          const SizedBox(height: 16),
+          _sessionCard(),
+        ]);
+        final right = _referenceCard();
+        return twoUp
+            ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Expanded(flex: 5, child: left),
+                const SizedBox(width: 16),
+                Expanded(flex: 6, child: right),
+              ])
+            : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [left, const SizedBox(height: 16), right]);
+      });
+    }
+
     return Scaffold(
-      backgroundColor: LenseScanTheme.surface,
-      appBar: AppBar(
-        backgroundColor: LenseScanTheme.surface.withValues(alpha: 0.9),
-        elevation: 0,
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: LenseScanTheme.primaryContainer.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(
-                Icons.verified_user_rounded,
-                size: 20,
-                color: LenseScanTheme.primary,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'LegalLens AI',
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
-                    color: LenseScanTheme.primary,
-                    letterSpacing: -0.2,
-                  ),
+      backgroundColor: LL.paper,
+      body: SafeArea(
+        child: RefreshIndicator(
+          onRefresh: _load,
+          color: LL.accent,
+          child: ListView(
+            padding: EdgeInsets.fromLTRB(pad, wide ? 28 : 16, pad, 32),
+            children: [
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1180),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    Text('Profile', style: TextStyle(fontSize: wide ? 30 : 24, fontWeight: FontWeight.w700, color: LL.text, letterSpacing: -0.6)),
+                    SizedBox(height: wide ? 22 : 16),
+                    body,
+                  ]),
                 ),
-                Text(
-                  'Officer Profile',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: LenseScanTheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: CircleAvatar(
-              radius: 16,
-              backgroundColor: LenseScanTheme.surfaceContainerHigh,
-              child: const Icon(
-                Icons.person,
-                size: 18,
-                color: LenseScanTheme.onSurfaceVariant,
               ),
-            ),
+            ],
           ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 12),
-
-            // ── Active Duty & HQ Encrypted Bar ──
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: LenseScanTheme.secondary,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    const Text(
-                      'ACTIVE DUTY',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.5,
-                        color: LenseScanTheme.secondary,
-                      ),
-                    ),
-                  ],
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: LenseScanTheme.surfaceContainerHigh,
-                    borderRadius: BorderRadius.circular(9999),
-                  ),
-                  child: const Text(
-                    'HQ Encrypted',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: LenseScanTheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-
-            // ── Officer Header Hero Card ──
-            _buildProfileHeroCard(context),
-            const SizedBox(height: 16),
-
-            // ── Quick Telemetry & Field Stats Strip ──
-            _buildStatsRow(context),
-            const SizedBox(height: 20),
-
-            // ── System & Field Config Section Header ──
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'SYSTEM & FIELD CONFIG',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.8,
-                    color: LenseScanTheme.onSurfaceVariant,
-                  ),
-                ),
-                Row(
-                  children: const [
-                    Icon(Icons.cell_tower, size: 14, color: LenseScanTheme.secondary),
-                    SizedBox(width: 4),
-                    Text(
-                      'Online',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: LenseScanTheme.secondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-
-            // ── Settings List ──
-            _buildSettingsList(context),
-            const SizedBox(height: 16),
-
-            // ── Sign Out Button ──
-            _buildSignOutButton(context),
-            const SizedBox(height: 16),
-
-            // ── Statutory Footer ──
-            Center(
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      Icon(Icons.policy_outlined, size: 13, color: LenseScanTheme.outline),
-                      SizedBox(width: 4),
-                      Text(
-                        'National Informatics Division • Legal Metrology',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: LenseScanTheme.outline,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  const Text(
-                    'LenseScan v2.4.1 (Build 108) • Govt of India',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: LenseScanTheme.outline,
-                      letterSpacing: 0.3,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 32),
-          ],
         ),
       ),
     );
   }
 
-  Widget _buildProfileHeroCard(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    final officerName = auth.username != null && auth.username!.isNotEmpty
-        ? (auth.username == 'officer' ? 'Rajesh Kumar Sharma' : auth.username!)
-        : 'Rajesh Kumar Sharma';
-
+  Widget _accountCard() {
+    final fullName = (_me?['full_name'] as String?)?.trim() ?? '';
+    final username = _me?['username'] as String? ?? '';
+    final role = _me?['role'] as String? ?? '';
+    final active = _me?['is_active'] == true;
+    final initial = (fullName.isNotEmpty ? fullName : username).isEmpty ? '?' : (fullName.isNotEmpty ? fullName : username)[0].toUpperCase();
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-      decoration: BoxDecoration(
-        color: LenseScanTheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: LenseScanTheme.outlineVariant.withValues(alpha: 0.2),
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(color: LL.accent, borderRadius: BorderRadius.circular(LL.radius)),
+      child: Row(children: [
+        CircleAvatar(
+          radius: 30,
+          backgroundColor: Colors.white,
+          child: Text(initial, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: LL.text)),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          // Avatar with verified badge
-          Stack(
-            children: [
-              Container(
-                width: 88,
-                height: 88,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: LenseScanTheme.surfaceContainerLow,
-                ),
-                padding: const EdgeInsets.all(4),
-                child: CircleAvatar(
-                  radius: 40,
-                  backgroundColor: LenseScanTheme.surfaceContainer,
-                  child: const Icon(
-                    Icons.person,
-                    size: 48,
-                    color: LenseScanTheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-              Positioned(
-                bottom: 2,
-                right: 2,
-                child: Container(
-                  width: 24,
-                  height: 24,
-                  decoration: const BoxDecoration(
-                    color: LenseScanTheme.secondary,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.check,
-                    size: 14,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-
-          // Officer Identity
-          Text(
-            officerName,
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w600,
-              color: LenseScanTheme.onSurface,
-              letterSpacing: -0.2,
-            ),
-          ),
-          const SizedBox(height: 2),
-          const Text(
-            'ID: LM-DL-4029 • Zone 4, Delhi',
-            style: TextStyle(
-              fontSize: 13,
-              color: LenseScanTheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 10),
-
-          // Official Role Chip
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(
-              color: LenseScanTheme.secondaryContainer.withValues(alpha: 0.4),
-              borderRadius: BorderRadius.circular(9999),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                Icon(
-                  Icons.shield_outlined,
-                  size: 15,
-                  color: LenseScanTheme.onSecondaryContainer,
-                ),
-                SizedBox(width: 5),
-                Text(
-                  'Senior Field Enforcement Officer',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.2,
-                    color: LenseScanTheme.onSecondaryContainer,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-
-          // Department Affiliation
-          Divider(
-            color: LenseScanTheme.outlineVariant.withValues(alpha: 0.2),
-            height: 1,
-          ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: const [
-              Icon(
-                Icons.account_balance_outlined,
-                size: 15,
-                color: LenseScanTheme.outline,
-              ),
-              SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  'Ministry of Consumer Affairs, Food & Public Distribution',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: LenseScanTheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(fullName.isEmpty ? username : fullName,
+                style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700, color: LL.onAccent, letterSpacing: -0.3)),
+            const SizedBox(height: 4),
+            Text(username, style: LL.mono(size: 12.5, color: Colors.white70)),
+            const SizedBox(height: 10),
+            Wrap(spacing: 8, runSpacing: 6, children: [
+              _darkPill(role.isEmpty ? 'No role' : role[0].toUpperCase() + role.substring(1)),
+              _darkPill(active ? 'Active account' : 'Account disabled'),
+            ]),
+          ]),
+        ),
+      ]),
     );
   }
 
-  Widget _buildStatsRow(BuildContext context) {
-    return Row(
-      children: [
-        _buildStatCard(
-          context,
-          icon: Icons.qr_code_scanner,
-          iconBg: LenseScanTheme.surfaceContainerHigh,
-          iconColor: LenseScanTheme.primary,
-          value: '412',
-          label: 'Total Scans',
-        ),
-        const SizedBox(width: 8),
-        _buildStatCard(
-          context,
-          icon: Icons.assignment_late_outlined,
-          iconBg: LenseScanTheme.errorContainer.withValues(alpha: 0.6),
-          iconColor: LenseScanTheme.error,
-          value: '38',
-          label: 'Notices Issued',
-        ),
-        const SizedBox(width: 8),
-        _buildStatCard(
-          context,
-          icon: Icons.verified_user_outlined,
-          iconBg: LenseScanTheme.secondaryContainer.withValues(alpha: 0.6),
-          iconColor: LenseScanTheme.secondary,
-          value: '99.4%',
-          label: 'Accuracy',
-          valueColor: LenseScanTheme.secondary,
-        ),
-      ],
-    );
-  }
+  Widget _darkPill(String text) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)),
+        child: Text(text, style: const TextStyle(fontSize: 12, color: LL.onAccent, fontWeight: FontWeight.w500)),
+      );
 
-  Widget _buildStatCard(
-    BuildContext context, {
-    required IconData icon,
-    required Color iconBg,
-    required Color iconColor,
-    required String value,
-    required String label,
-    Color? valueColor,
-  }) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-        decoration: BoxDecoration(
-          color: LenseScanTheme.surfaceContainerLowest,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: LenseScanTheme.outlineVariant.withValues(alpha: 0.2),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.03),
-              blurRadius: 4,
-              offset: const Offset(0, 1),
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
+  Widget _statsCard() {
+    final total = (_summary?['total_inspections'] as num?)?.toInt() ?? 0;
+    final compliant = (_summary?['compliant_count'] as num?)?.toInt() ?? 0;
+    final notCompliant = (_summary?['non_compliant_count'] as num?)?.toInt() ?? 0;
+    final week = (_summary?['week_inspections'] as num?)?.toInt() ?? 0;
+    final role = _me?['role'] as String? ?? '';
+    var n = 0;
+    Widget tile(IconData icon, String value, String label, {Color color = LL.text}) => Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                color: iconBg,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(icon, size: 16, color: iconColor),
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(color: LL.pastel(n++), shape: BoxShape.circle),
+              child: Icon(icon, size: 18, color: LL.text),
             ),
-            const SizedBox(height: 6),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: valueColor ?? LenseScanTheme.onSurface,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                color: LenseScanTheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-      ),
+            const SizedBox(height: 12),
+            Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: color, letterSpacing: -0.5)),
+            Text(label, style: const TextStyle(fontSize: 12, color: LL.muted)),
+          ]),
+        );
+    return LLCard(
+      title: role == 'officer' ? 'Your inspections' : 'All inspections',
+      subtitle: role == 'officer' ? 'Only inspections you scanned.' : 'Department-wide, as your role allows.',
+      child: Row(children: [
+        tile(Icons.receipt_long_outlined, '$total', 'Total'),
+        tile(Icons.verified_outlined, '$compliant', 'Compliant'),
+        tile(Icons.report_gmailerrorred_outlined, '$notCompliant', 'Not compliant', color: notCompliant > 0 ? LL.danger : LL.text),
+        tile(Icons.calendar_today_outlined, '$week', 'Last 7 days'),
+      ]),
     );
   }
 
-  Widget _buildSettingsList(BuildContext context) {
-    return Column(
-      children: [
-        _buildSettingItem(
-          icon: Icons.speed,
-          title: 'Device & Scanner Calibration',
-          subtitle: 'Dual-lens OCR tuned • Calibrated 3d ago',
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: LenseScanTheme.secondary,
-                ),
-              ),
-              const SizedBox(width: 8),
-              const Icon(Icons.chevron_right, size: 20, color: LenseScanTheme.outline),
-            ],
+  Widget _sessionCard() {
+    return LLCard(
+      title: 'Session',
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          const Text('Server', style: TextStyle(fontSize: 13, color: LL.muted)),
+          const SizedBox(width: 12),
+          Expanded(child: Text(AppConfig.apiBaseUrl, textAlign: TextAlign.right, style: LL.mono(size: 12.5, color: LL.text))),
+        ]),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: _signOut,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: LL.danger,
+            side: const BorderSide(color: LL.line),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: const StadiumBorder(),
           ),
+          icon: const Icon(Icons.logout, size: 18),
+          label: const Text('Sign out', style: TextStyle(fontWeight: FontWeight.w600)),
         ),
-        const SizedBox(height: 8),
-        _buildSettingItem(
-          icon: Icons.cloud_sync_outlined,
-          title: 'Offline Cache & Sync',
-          subtitle: 'Auto-sync on unmetered Wi-Fi',
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: LenseScanTheme.tertiaryContainer.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(9999),
-                ),
-                child: const Text(
-                  '14 pending',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: LenseScanTheme.error,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              const Icon(Icons.chevron_right, size: 20, color: LenseScanTheme.outline),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-        _buildSettingItem(
-          icon: Icons.lock_clock_outlined,
-          title: 'Change Security PIN & Password',
-          subtitle: 'Biometrics enabled for rapid dossier sign-off',
-          trailing: const Icon(Icons.chevron_right, size: 20, color: LenseScanTheme.outline),
-        ),
-        const SizedBox(height: 8),
-        _buildSettingItem(
-          icon: Icons.notifications_active_outlined,
-          title: 'Notification & Alert Preferences',
-          subtitle: 'Statutory alert broadcasts & raid alerts',
-          trailing: const Icon(Icons.chevron_right, size: 20, color: LenseScanTheme.outline),
-        ),
-        const SizedBox(height: 8),
-        _buildSettingItem(
-          icon: Icons.menu_book_outlined,
-          title: 'Legal Metrology Rules Reference',
-          subtitle: 'Packaged Commodities Act (2011 & Amendments)',
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: const [
-              Icon(Icons.bookmark_outline, size: 16, color: LenseScanTheme.primary),
-              SizedBox(width: 6),
-              Icon(Icons.chevron_right, size: 20, color: LenseScanTheme.outline),
-            ],
-          ),
-        ),
-      ],
+      ]),
     );
   }
 
-  Widget _buildSettingItem({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required Widget trailing,
-  }) {
-    return Material(
-      color: LenseScanTheme.surfaceContainerLowest,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: () {},
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: LenseScanTheme.outlineVariant.withValues(alpha: 0.2),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.02),
-                blurRadius: 4,
-                offset: const Offset(0, 1),
-              ),
-            ],
+  Widget _referenceCard() {
+    return LLCard(
+      title: 'LMPC Rules, 2011 quick reference',
+      subtitle: 'What every package must declare, and the Rule 7(2) minimum letter height.',
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        for (var i = 0; i < _lmpcReference.length; i++) ...[
+          if (i > 0) const Divider(height: 1, thickness: 1, color: LL.line),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              SizedBox(width: 108, child: Text(_lmpcReference[i].$1, style: LL.mono(size: 12.5, color: LL.text))),
+              Expanded(child: Text(_lmpcReference[i].$2, style: const TextStyle(fontSize: 13.5, color: LL.text))),
+            ]),
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: LenseScanTheme.surfaceContainer,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon, size: 22, color: LenseScanTheme.primary),
+        ],
+        const SizedBox(height: 18),
+        const Text('Rule 7(2) Table-I · normal print', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: LL.text)),
+        const SizedBox(height: 10),
+        Container(
+          decoration: BoxDecoration(color: LL.hover, borderRadius: BorderRadius.circular(LL.radiusSmall)),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          child: Column(children: [
+            for (final (area, mm) in _fontTable)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(children: [
+                  Expanded(child: Text('Display panel area $area', style: const TextStyle(fontSize: 13, color: LL.muted))),
+                  Text(mm, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: LL.text)),
+                ]),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: LenseScanTheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: LenseScanTheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              trailing,
-            ],
-          ),
+          ]),
         ),
-      ),
-    );
-  }
-
-  Widget _buildSignOutButton(BuildContext context) {
-    return Material(
-      color: LenseScanTheme.errorContainer.withValues(alpha: 0.6),
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: () {
-          context.read<AuthProvider>().logout();
-        },
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: const [
-              Icon(Icons.logout, size: 20, color: LenseScanTheme.error),
-              SizedBox(width: 8),
-              Text(
-                'Sign Out of Field Session',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: LenseScanTheme.error,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+      ]),
     );
   }
 }

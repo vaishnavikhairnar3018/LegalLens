@@ -116,7 +116,7 @@ def _sample_declarations(is_compliant: bool = False):
             "min_font_mm": 2.0,
             "compliant": is_compliant,
             "violations": violations,
-            "legal_rule": "Rule 6(1)(b)",
+            "legal_rule": "Rule 6(1)(c)",
         },
         {
             "field_name": "manufacturer_details",
@@ -136,7 +136,7 @@ def _sample_declarations(is_compliant: bool = False):
             "min_font_mm": 1.0,
             "compliant": True,
             "violations": [],
-            "legal_rule": "Rule 6(1)(h)",
+            "legal_rule": "Rule 6(2)",
         },
     ]
 
@@ -161,6 +161,31 @@ def test_pdf_generation_violation_notice():
     assert isinstance(pdf_bytes, bytes)
     assert len(pdf_bytes) > 1000
     assert pdf_bytes.startswith(b"%PDF-")
+
+
+def test_pdf_product_name_with_markup_characters_is_escaped():
+    """Officer-typed names may contain & or < >; the PDF must render them as text, not fail."""
+    import io
+    from pypdf import PdfReader
+
+    name = "Haldiram's Aloo Bhujia & Co <Spl>"
+    pdf_bytes = generate_inspection_pdf(
+        inspection_id="esc-1",
+        officer_name="Test Officer",
+        officer_id=1,
+        image_filename="a.jpg",
+        image_hash_sha256="0" * 64,
+        timestamp=datetime.now(timezone.utc),
+        overall_compliant=False,
+        total_fields=1,
+        compliant_fields=0,
+        non_compliant_fields=1,
+        summary="x",
+        declarations=_sample_declarations(is_compliant=False),
+        product_name=name,
+    )
+    text = "".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf_bytes)).pages)
+    assert name in text
 
 
 def test_pdf_generation_certificate_of_compliance():
@@ -534,5 +559,305 @@ async def test_pre_capture_and_multi_panel_endpoints(
     res_single = await client.post("/api/v1/scan/multi-panel", files=files_single, headers=officer_headers)
     assert res_single.status_code == 400
     assert "At least 2 panel images are required" in res_single.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_product_scan_combines_clean_and_marker_photos(
+    client: AsyncClient, test_officer: User, monkeypatch
+):
+    """POST /scan/product: text from a clean photo, scale from a marker photo, every photo hashed and stored."""
+    import cv2
+    import numpy as np
+    from app.routers import scan as scan_router
+    from app.schemas.scan import OCRResult, BoundingBox
+    from app.services.calibration import CalibrationResult
+
+    def png(shade):
+        return cv2.imencode(".png", np.full((120, 120, 3), shade, dtype=np.uint8))[1].tobytes()
+
+    clean_bytes, marker_bytes = png(200), png(210)
+
+    def box(i):
+        return BoundingBox(top_left=[20, 20 + 40 * i], top_right=[170, 20 + 40 * i],
+                           bottom_right=[170, 50 + 40 * i], bottom_left=[20, 50 + 40 * i])
+
+    def ocr(texts):
+        return [OCRResult(text=t, confidence=0.95, font_height_px=30.0, bbox=box(i)) for i, t in enumerate(texts)]
+
+    # The server re-encodes each upload once before calibration and OCR, so the fakes recognise a
+    # photo by its pixels (grey level 200 = clean, 210 = marker), not by the uploaded bytes.
+    def shade(data):
+        return int(round(cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR).mean()))
+
+    ocr_by_shade = {
+        # Clean photo: MRP readable. Marker photo: the marker covers the MRP, net quantity is visible.
+        200: ocr(["MRP Rs. 10.00 (Incl. of all taxes)", "Spice blend", "Keep cool", "Packed in India", "Batch 12"]),
+        210: ocr(["Net Weight: 12 g", "Spice blend", "Keep cool", "Packed in India", "Batch 12"]),
+    }
+
+    def fake_calibrate(data):
+        if shade(data) == 210:
+            return CalibrationResult(calibration_method="aruco_40mm", reference_size_mm=40.0, pixels_per_mm=10.0,
+                                     calibration_confidence=1.0, calibration_status="calibrated")
+        return CalibrationResult(calibration_method="none", pixels_per_mm=None, calibration_status="no_reference")
+
+    monkeypatch.setattr(scan_router, "calibrate_image", fake_calibrate)
+    monkeypatch.setattr(scan_router, "preprocess_image", lambda data: data)
+    monkeypatch.setattr(scan_router, "extract_text", lambda data, dpi, languages: ocr_by_shade[shade(data)])
+
+    token = create_access_token(data={"sub": test_officer.username, "role": test_officer.role.value})
+    headers = {"Authorization": f"Bearer {token}"}
+    files = [
+        ("images", ("clean.png", clean_bytes, "image/png")),
+        ("images", ("marker.png", marker_bytes, "image/png")),
+    ]
+
+    # Negative: no token -> 401
+    unauth = await client.post("/api/v1/scan/product", files=files)
+    assert unauth.status_code == 401
+
+    res = await client.post(
+        "/api/v1/scan/product",
+        files=files,
+        headers=headers,
+        data={"pdp_area_cm2": "60", "product_name": "  Everest Shahi Paneer Masala 12g  "},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["product_name"] == "Everest Shahi Paneer Masala 12g"
+
+    # The officer-entered name is what lists and exports show
+    listing = await client.get("/api/v1/inspections/", headers=headers)
+    assert listing.json()[0]["product_name"] == "Everest Shahi Paneer Masala 12g"
+
+    photos = body["photos"]
+    assert [p["filename"] for p in photos] == ["clean.png", "marker.png"]
+    assert photos[0]["image_hash_sha256"] == hashlib.sha256(clean_bytes).hexdigest()
+    assert photos[1]["image_hash_sha256"] == hashlib.sha256(marker_bytes).hexdigest()
+    assert [p["calibration_method"] for p in photos] == ["none", "aruco_40mm"]
+
+    decls = {d["field_name"]: d for d in body["declarations"]}
+    # MRP only readable in the clean photo: present, but its font size goes to review
+    assert decls["mrp"]["detected"] is True
+    assert decls["mrp"]["font_height_mm"] is None
+    assert decls["mrp"]["font_review_required"] is True
+    # Net quantity seen in the marker photo: measured (30 px / 10 px/mm = 3.0 mm) against the 60 cm2 PDP minimum
+    assert decls["net_quantity"]["font_height_mm"] == 3.0
+    assert decls["net_quantity"]["required_font_height_mm"] == 1.5
+
+    # Stored once, with every photo's evidence hash
+    detail = await client.get(f"/api/v1/inspections/{body['scan_id']}", headers=headers)
+    assert detail.status_code == 200
+    stored = detail.json()["photos"]
+    assert [p["image_hash_sha256"] for p in stored] == [p["image_hash_sha256"] for p in photos]
+    assert detail.json()["product_name"] == "Everest Shahi Paneer Masala 12g"
+
+    # Both notices list every photo's hash
+    import io
+    from docx import Document
+    from pypdf import PdfReader
+
+    pdf = await client.get(f"/api/v1/inspections/{body['scan_id']}/notice.pdf", headers=headers)
+    assert pdf.status_code == 200
+    pdf_text = "".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf.content)).pages).replace("\n", "")
+    docx = await client.get(f"/api/v1/inspections/{body['scan_id']}/notice.docx", headers=headers)
+    assert docx.status_code == 200
+    docx_text = " ".join(cell.text for t in Document(io.BytesIO(docx.content)).tables for row in t.rows for cell in row.cells)
+    for p in photos:
+        assert p["image_hash_sha256"] in pdf_text
+        assert p["image_hash_sha256"] in docx_text
+    assert "Everest Shahi Paneer Masala 12g" in pdf_text
+    assert "Everest Shahi Paneer Masala 12g" in docx_text
+
+
+def _phone_photo_with_marker(width=4000, height=3000, marker_px=800):
+    """A phone-sized JPEG with a real 40 mm ArUco marker (DICT_4X4_50, id 0) drawn marker_px wide."""
+    import cv2
+    import numpy as np
+
+    canvas = np.full((height, width, 3), 235, dtype=np.uint8)
+    marker = cv2.aruco.generateImageMarker(cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50), 0, marker_px)
+    canvas[400:400 + marker_px, 600:600 + marker_px] = cv2.cvtColor(marker, cv2.COLOR_GRAY2BGR)
+    return cv2.imencode(".jpg", canvas, [cv2.IMWRITE_JPEG_QUALITY, 92])[1].tobytes()
+
+
+@pytest.mark.asyncio
+async def test_product_scan_measures_scale_and_text_on_the_same_image(
+    client: AsyncClient, test_officer: User, monkeypatch
+):
+    """A full-size phone photo (4000x3000): the marker scale (px/mm) and the OCR boxes must refer to
+    the same pixels, or every letter height in mm is wrong. The evidence hash stays on the raw upload."""
+    import cv2
+    import numpy as np
+    from app.routers import scan as scan_router
+
+    photo = _phone_photo_with_marker()
+    seen = {}
+
+    def recording_ocr(image, dpi, languages):
+        seen["ocr_shape"] = image.shape[:2]
+        return []
+
+    real_calibrate = scan_router.calibrate_image
+
+    def recording_calibrate(data):
+        seen["calibration_shape"] = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR).shape[:2]
+        return real_calibrate(data)
+
+    monkeypatch.setattr(scan_router, "extract_text", recording_ocr)
+    monkeypatch.setattr(scan_router, "calibrate_image", recording_calibrate)
+
+    token = create_access_token(data={"sub": test_officer.username, "role": test_officer.role.value})
+    res = await client.post(
+        "/api/v1/scan/product",
+        files=[("images", ("IMG_full.jpg", photo, "image/jpeg"))],
+        headers={"Authorization": f"Bearer {token}"},
+        data={"product_name": "Marker test"},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+
+    assert seen["calibration_shape"] == seen["ocr_shape"]
+    assert max(seen["ocr_shape"]) <= 2048
+    # The 800 px marker shrinks by 2048/4000, so the scale is 800 * 0.512 / 40 = 10.24 px per mm on the OCR image.
+    assert body["photos"][0]["pixels_per_mm"] == pytest.approx(10.24, rel=0.03)
+    assert body["photos"][0]["image_hash_sha256"] == hashlib.sha256(photo).hexdigest()
+
+
+def _noisy_jpeg(width, height, seed):
+    """A photo-like JPEG whose size is close to a real phone photo (noise does not compress)."""
+    import cv2
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    pixels = rng.integers(0, 256, (height, width, 3), dtype=np.uint8)
+    return cv2.imencode(".jpg", pixels, [cv2.IMWRITE_JPEG_QUALITY, 90])[1].tobytes()
+
+
+@pytest.mark.asyncio
+async def test_product_scan_accepts_several_full_size_photos(
+    client: AsyncClient, test_officer: User, monkeypatch
+):
+    """The app now sends original phone photos (about 4 MB each). Three of them together are over
+    10 MB; the request must still be accepted, because the 10 MB limit is per photo."""
+    from app.routers import scan as scan_router
+
+    monkeypatch.setattr(scan_router, "extract_text", lambda image, dpi, languages: [])
+    photos = [_noisy_jpeg(2400, 1800, seed) for seed in range(3)]
+    assert all(len(p) < 10 * 1024 * 1024 for p in photos)
+    assert sum(len(p) for p in photos) > 10 * 1024 * 1024
+
+    token = create_access_token(data={"sub": test_officer.username, "role": test_officer.role.value})
+    res = await client.post(
+        "/api/v1/scan/product",
+        files=[("images", (f"IMG_{i}.jpg", p, "image/jpeg")) for i, p in enumerate(photos)],
+        headers={"Authorization": f"Bearer {token}"},
+        data={"product_name": "Size test"},
+    )
+    assert res.status_code == 200, res.text
+
+
+@pytest.mark.asyncio
+async def test_product_scan_still_rejects_one_photo_over_the_limit(client: AsyncClient, test_officer: User):
+    """The per-photo limit is unchanged: a single photo over 10 MB is refused with its name."""
+    big = _noisy_jpeg(4200, 3200, 7)
+    assert len(big) > 10 * 1024 * 1024
+    token = create_access_token(data={"sub": test_officer.username, "role": test_officer.role.value})
+    res = await client.post(
+        "/api/v1/scan/product",
+        files=[("images", ("IMG_big.jpg", big, "image/jpeg"))],
+        headers={"Authorization": f"Bearer {token}"},
+        data={"product_name": "Size test"},
+    )
+    assert res.status_code == 413
+    assert "IMG_big.jpg" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_single_scan_measures_scale_and_text_on_the_same_image(
+    client: AsyncClient, test_officer: User, monkeypatch
+):
+    """POST /scan/ follows the same rule as /scan/product for a full-size photo."""
+    import cv2
+    import numpy as np
+    from app.routers import scan as scan_router
+
+    photo = _phone_photo_with_marker()
+    seen = {}
+    real_calibrate = scan_router.calibrate_image
+
+    def recording_calibrate(data):
+        seen["calibration_shape"] = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR).shape[:2]
+        return real_calibrate(data)
+
+    def recording_ocr(image, dpi, languages):
+        seen["ocr_shape"] = image.shape[:2]
+        return []
+
+    monkeypatch.setattr(scan_router, "extract_text", recording_ocr)
+    monkeypatch.setattr(scan_router, "calibrate_image", recording_calibrate)
+
+    token = create_access_token(data={"sub": test_officer.username, "role": test_officer.role.value})
+    res = await client.post(
+        "/api/v1/scan/",
+        files={"image": ("IMG_full.jpg", photo, "image/jpeg")},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 200, res.text
+    assert seen["calibration_shape"] == seen["ocr_shape"]
+    assert res.json()["image_hash_sha256"] == hashlib.sha256(photo).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_scan_endpoint_uses_pdp_area_form_field(
+    client: AsyncClient, test_officer: User, monkeypatch
+):
+    """POST /scan/ with pdp_area_cm2 applies the Rule 7(2) area table; a non-positive area is rejected."""
+    import cv2
+    import numpy as np
+    from app.routers import scan as scan_router
+    from app.schemas.scan import OCRResult, BoundingBox
+    from app.services.calibration import CalibrationResult
+
+    def fake_calibrate(_bytes):
+        return CalibrationResult(
+            calibration_method="aruco_40mm", reference_size_mm=40.0,
+            pixels_per_mm=10.0, calibration_confidence=1.0, calibration_status="calibrated",
+        )
+
+    def fake_ocr(_img, dpi, languages):
+        texts = ["MRP Rs. 50.00 (Incl. of all taxes)", "Net Weight: 200 g", "Tasty", "Crunchy", "Fresh", "Golden"]
+        return [
+            OCRResult(
+                text=t, confidence=0.95, font_height_px=50.0,
+                bbox=BoundingBox(top_left=[20, 20 + 40 * i], top_right=[170, 20 + 40 * i],
+                                 bottom_right=[170, 50 + 40 * i], bottom_left=[20, 50 + 40 * i]),
+            )
+            for i, t in enumerate(texts)
+        ]
+
+    monkeypatch.setattr(scan_router, "calibrate_image", fake_calibrate)
+    monkeypatch.setattr(scan_router, "extract_text", fake_ocr)
+
+    token = create_access_token(data={"sub": test_officer.username, "role": test_officer.role.value})
+    headers = {"Authorization": f"Bearer {token}"}
+    _, buf = cv2.imencode(".png", np.full((200, 200, 3), 230, dtype=np.uint8))
+
+    res = await client.post(
+        "/api/v1/scan/", headers=headers,
+        files={"image": ("label.png", buf.tobytes(), "image/png")},
+        data={"pdp_area_cm2": "300"},
+    )
+    assert res.status_code == 200, res.text
+    mrp = next(d for d in res.json()["declarations"] if d["field_name"] == "mrp")
+    assert mrp["pdp_area_cm2"] == 300.0
+    assert mrp["required_font_height_mm"] == 2.5
+
+    res_bad = await client.post(
+        "/api/v1/scan/", headers=headers,
+        files={"image": ("label.png", buf.tobytes(), "image/png")},
+        data={"pdp_area_cm2": "0"},
+    )
+    assert res_bad.status_code == 422
 
 

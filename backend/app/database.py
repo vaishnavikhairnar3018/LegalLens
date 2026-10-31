@@ -63,6 +63,27 @@ async def get_db() -> AsyncSession:
             await session.close()
 
 
+# Columns added after the first release. create_all() never alters existing tables,
+# so add them to databases created by an earlier version. (table, column, SQL type)
+_ADDED_COLUMNS = [
+    ("inspections", "evidence_json", "TEXT"),
+    ("inspections", "product_name", "VARCHAR(200)"),
+]
+
+
+def _add_missing_columns(sync_conn) -> None:
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(sync_conn)
+    for table, column, sql_type in _ADDED_COLUMNS:
+        if not inspector.has_table(table):
+            continue
+        existing = {c["name"] for c in inspector.get_columns(table)}
+        if column not in existing:
+            sync_conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}"))
+            logger.info(f"Added column {table}.{column}")
+
+
 async def init_db():
     """
     Create all tables. Called on application startup.
@@ -72,6 +93,7 @@ async def init_db():
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            await conn.run_sync(_add_missing_columns)
     except Exception as exc:
         if "sqlite" not in settings.DATABASE_URL:
             logger.warning(
@@ -87,6 +109,7 @@ async def init_db():
             )
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+                await conn.run_sync(_add_missing_columns)
             logger.info("Local SQLite database initialized at lensescan.db.")
         else:
             raise

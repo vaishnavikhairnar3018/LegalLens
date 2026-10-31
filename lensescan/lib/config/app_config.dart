@@ -13,15 +13,31 @@ class AppConfig {
   /// - Web (Laptop browser): http://localhost:8000
   /// - Web (Mobile phone browser over Wi-Fi): http://<host>:8000
   /// - Android Device over Wi-Fi: http://10.244.134.104:8000
+  /// Optional build-time override: flutter run --dart-define=API_BASE_URL=http://127.0.0.1:8001
+  static const String _apiBaseOverride = String.fromEnvironment('API_BASE_URL');
+
   static String get apiBaseUrl {
+    if (_apiBaseOverride.isNotEmpty) return _apiBaseOverride;
     if (kIsWeb) {
-      final host = Uri.base.host.isNotEmpty ? Uri.base.host : '127.0.0.1';
+      final origin = Uri.base.origin;
+      final host = Uri.base.host;
       final port = Uri.base.port;
-      final scheme = Uri.base.scheme.isNotEmpty ? Uri.base.scheme : 'http';
-      if (port == 8443) {
-        return '$scheme://$host:$port';
+
+      // 1. Local Flutter dev server (random debug port on localhost/127.0.0.1)
+      if ((host == 'localhost' || host == '127.0.0.1') &&
+          port != 5000 &&
+          port != 8443 &&
+          port != 8000) {
+        return 'http://127.0.0.1:8000';
       }
-      return 'http://$host:8000';
+
+      // 2. Wi-Fi proxy (5000 / 8443), Cloudflare tunnel (*.trycloudflare.com), or remote host:
+      // The host/proxy serves both frontend and /api/ backend from the exact same origin.
+      if (origin.isNotEmpty && origin != 'null') {
+        return origin;
+      }
+
+      return 'http://127.0.0.1:8000';
     }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:

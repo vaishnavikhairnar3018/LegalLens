@@ -58,7 +58,7 @@ LenseScan is a high-security software system that scans packaged commodity label
 │  │  CPU Mode      │  │  │  │  ├─ Presence Check         │  │
 │  └────────────────┘  │  │  │  ├─ Format Validation      │  │
 │  ┌────────────────┐  │  │  │  ├─ Font Size (Sched. II)  │  │
-│  │  OpenCV        │  │  │  │  ├─ Placement (Rule 6 PDP) │  │
+│  │  OpenCV        │  │  │  │  ├─ Placement (Rule 8 PDP) │  │
 │  │  CLAHE + DPI   │  │  │  │  └─ Special Rules          │  │
 │  │  Preprocessing │  │  │  └────────────────────────────┘  │
 │  └────────────────┘  │  │  ┌────────────────────────────┐  │
@@ -157,20 +157,30 @@ LenseScan is a high-security software system that scans packaged commodity label
 
 ### 5.1 LMPC Rules 2011 Coverage
 
+Citations verified against the Ministry of Consumer Affairs consolidated text,
+*Legal Metrology (Packaged Commodities) Rules, 2011 with all amendments*.
+
 | Rule | Declaration | Checks Performed |
 |------|------------|------------------|
-| Rule 6(1)(a) | Manufacturer Details | Presence, PIN code, address format |
-| Rule 6(1)(b) | Net Quantity | Presence, format, unit validation |
-| Rule 6(1)(c) | Manufacturing Date | Presence, date format |
-| Rule 6(1)(d) | Best Before / Expiry | Presence, date format |
-| Rule 6(1)(e) | MRP | Presence, format, "incl. all taxes" |
-| Rule 6(1)(f) | Generic/Commodity Name | Presence |
-| Rule 6(1)(g) | Country of Origin | Presence |
-| Rule 6(1)(h) | Consumer Care | Presence, phone/email |
-| Rule 6(2) | Placement (PDP) | Spatial co-location of MRP + Net Qty |
-| Rule 12 + Schedule II | Font Height | Measured vs. minimum per surface area tier |
+| Rule 6(1)(a) | Manufacturer / Packer / Importer Name & Address | Presence, PIN code, address format |
+| Rule 6(1)(aa) | Country of Origin (imported products) | Presence |
+| Rule 6(1)(b) | Common / Generic Name | Presence |
+| Rule 6(1)(c) | Net Quantity | Presence, format, unit validation |
+| Rule 6(1)(d) | Month & Year of Manufacture | Presence, date format |
+| Rule 6(1)(da) | Best Before / Use By | Presence, date format |
+| Rule 6(1)(e) | MRP (inclusive of all taxes) | Presence, format, "incl. all taxes" |
+| Rule 6(2) | Consumer Care | Presence, phone/email |
+| Rule 6(11) | Unit Sale Price | Reconciliation with MRP / net quantity |
+| Rule 7(2) | Font Height | Measured (ArUco/coin/card scale) vs. Table-I minimum for the officer-supplied PDP area, all declarations; no area or no marker → manual review |
+| Rule 8(1) | Placement (PDP) | Declarations on the Principal Display Panel |
+| Rule 12(6) | Quantity qualifiers | No "approximately", "minimum", "not less than" etc. |
+| Rule 13(2), 13(5) | Units of quantity | g/ml below 1 kg/1 L; SI unit symbols |
 
-### 5.2 Placement Validation (Rule 6 PDP)
+Rule 5 and the Second Schedule (standard pack sizes) were omitted w.e.f. 01.10.2022
+(GSR 779(E)); no pack-size check is performed. Conflicting MRPs on one package are
+flagged for officer review without a statutory citation.
+
+### 5.2 Placement Validation (Rule 8(1) PDP)
 Using OCR bounding box coordinates, the engine performs:
 1. **PDP Co-location Check:** MRP and Net Quantity must be within 40% proximity
 2. **Margin Detection:** Key declarations must not be in extreme margins (≤5%)

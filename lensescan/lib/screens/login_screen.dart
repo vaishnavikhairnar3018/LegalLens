@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 
 import '../config/theme.dart';
 import '../core/auth/auth_provider.dart';
+import '../widgets/legal_lens_logo.dart';
 
 /// Secure login screen with form validation and loading states.
 class LoginScreen extends StatefulWidget {
@@ -71,6 +72,7 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFFAF7F2), // ShipMates Warm Cream Canvas
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -84,8 +86,8 @@ class _LoginScreenState extends State<LoginScreen>
                   child: Column(
                     children: [
                       // ── Ministry Line (top) ──
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
+                      const Padding(
+                        padding: EdgeInsets.only(top: 8),
                         child: Text(
                           'Ministry of Consumer Affairs',
                           style: TextStyle(
@@ -99,11 +101,13 @@ class _LoginScreenState extends State<LoginScreen>
 
                       // ── Center Content ──
                       Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 32),
+                        padding: const EdgeInsets.symmetric(vertical: 24),
                         child: Column(
                           children: [
                             _buildBrandHeader(),
-                            const SizedBox(height: 32),
+                            const SizedBox(height: 24),
+                            _buildQuickAccountSelector(),
+                            const SizedBox(height: 24),
                             _buildLoginForm(),
                           ],
                         ),
@@ -125,39 +129,142 @@ class _LoginScreenState extends State<LoginScreen>
   Widget _buildBrandHeader() {
     return Column(
       children: [
-        // Logo icon
-        Container(
-          width: 64,
-          height: 64,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            color: LenseScanTheme.primaryContainer,
-          ),
-          child: const Icon(
-            Icons.verified_user_rounded,
-            size: 32,
-            color: LenseScanTheme.onPrimary,
-          ),
-        ),
+        // Modern Vector Emblem
+        const LegalLensLogo(size: 68),
         const SizedBox(height: 16),
 
         // App name
         Text(
           'LegalLens AI',
           style: Theme.of(context).textTheme.displayMedium?.copyWith(
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w800,
+                color: const Color(0xFF282038),
+                letterSpacing: -0.5,
               ),
         ),
         const SizedBox(height: 4),
 
         // Tagline
-        Text(
-          'Field Compliance Scanner',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: LenseScanTheme.onSurfaceVariant,
-              ),
+        const Text(
+          'Field Compliance Scanner • LMPC Rules 2011',
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF7E768F),
+          ),
         ),
       ],
+    );
+  }
+
+  Widget _buildQuickAccountSelector() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.flash_on_rounded,
+                size: 14,
+                color: LenseScanTheme.primary.withValues(alpha: 0.8),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                'QUICK SIGN-IN',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6,
+                  color: LenseScanTheme.onSurfaceVariant.withValues(alpha: 0.75),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _buildRoleChip(
+                  label: 'Officer',
+                  roleName: 'officer_verma',
+                  rolePass: 'officer123',
+                  icon: Icons.shield_outlined,
+                  color: LenseScanTheme.primary,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _buildRoleChip(
+                  label: 'Supervisor',
+                  roleName: 'supervisor_sharma',
+                  rolePass: 'super123',
+                  icon: Icons.verified_outlined,
+                  color: LenseScanTheme.secondary,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: _buildRoleChip(
+                  label: 'Admin',
+                  roleName: 'admin',
+                  rolePass: 'Admin@123456',
+                  icon: Icons.admin_panel_settings_outlined,
+                  color: const Color(0xFF7C3AED),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRoleChip({
+    required String label,
+    required String roleName,
+    required String rolePass,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () {
+          _usernameController.text = roleName;
+          _passwordController.text = rolePass;
+          _handleLogin();
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withValues(alpha: 0.25)),
+          ),
+          child: Column(
+            children: [
+              Icon(icon, size: 16, color: color),
+              const SizedBox(height: 3),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -174,7 +281,7 @@ class _LoginScreenState extends State<LoginScreen>
               const SizedBox(height: 6),
               TextFormField(
                 controller: _usernameController,
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   hintText: 'LM-DL-4029',
                   hintStyle: TextStyle(
                     fontSize: 15,
@@ -207,7 +314,7 @@ class _LoginScreenState extends State<LoginScreen>
                 controller: _passwordController,
                 decoration: InputDecoration(
                   hintText: '••••••••',
-                  hintStyle: TextStyle(
+                  hintStyle: const TextStyle(
                     fontSize: 15,
                     fontFamily: 'monospace',
                     color: LenseScanTheme.outline,
@@ -351,7 +458,7 @@ class _LoginScreenState extends State<LoginScreen>
   Widget _buildFieldLabel(String label) {
     return Text(
       label,
-      style: TextStyle(
+      style: const TextStyle(
         fontSize: 12,
         fontWeight: FontWeight.w500,
         letterSpacing: 0.12,

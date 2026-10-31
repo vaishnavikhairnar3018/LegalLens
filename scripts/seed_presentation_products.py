@@ -4,7 +4,7 @@ specifically formatted for high-impact PPT presentation screenshots.
 
 Features:
 - Real FMCG brands (Nestle Maggi, Balaji, Britannia, ITC Dark Fantasy, Surf Excel, Vim, Godrej, Haldiram, etc.)
-- Real statutory citations (Rule 6(1)(e), Rule 6(1)(a), Schedule II font height, Rule 6(2) placement, etc.)
+- Real statutory citations (Rule 6(1)(e), Rule 6(1)(a), Rule 7(2) font height, Rule 8(1) placement, etc.)
 - Realistic timestamps distributed across TODAY, YESTERDAY, and THIS WEEK
 - Full 8-field declaration lists for Results Screen & PDF/Word report generation
 """
@@ -35,11 +35,11 @@ def generate_declarations(p):
         {
             "field_name": "net_quantity",
             "display_name": "Net Quantity",
-            "rule": "Rule 6(1)(d)",
+            "rule": "Rule 6(1)(c)",
             "val": p.get("net_qty", "100g"),
             "font": 3.2,
             "req_font": 2.5,
-            "is_violation": "Rule 6(1)(a)" in p.get("citation", "") or "Rule 6(1)(d)" in p.get("citation", ""),
+            "is_violation": "Rule 6(1)(c)" in p.get("citation", ""),
         },
         {
             "field_name": "manufacturer",
@@ -48,12 +48,12 @@ def generate_declarations(p):
             "val": p.get("mfg", "Manufactured & Packed in India"),
             "font": 2.1,
             "req_font": 2.0,
-            "is_violation": "Schedule II" in p.get("citation", "") and "manufacturer" in p.get("details", "").lower(),
+            "is_violation": "Rule 7(2)" in p.get("citation", "") and "manufacturer" in p.get("details", "").lower(),
         },
         {
             "field_name": "mfg_date",
             "display_name": "Month & Year of Manufacture",
-            "rule": "Rule 6(1)(f)",
+            "rule": "Rule 6(1)(d)",
             "val": p.get("date", "06/2026"),
             "font": 2.4,
             "req_font": 1.5,
@@ -62,7 +62,7 @@ def generate_declarations(p):
         {
             "field_name": "expiry_date",
             "display_name": "Best Before / Expiry Period",
-            "rule": "Rule 6(1)(g)",
+            "rule": "Rule 6(1)(da)",
             "val": "Best Before 12 Months from Packing",
             "font": 2.2,
             "req_font": 1.5,
@@ -80,7 +80,7 @@ def generate_declarations(p):
         {
             "field_name": "unit_sale_price",
             "display_name": "Unit Sale Price (USP)",
-            "rule": "Rule 6(1)(k)",
+            "rule": "Rule 6(11)",
             "val": p.get("usp", "₹0.15/g"),
             "font": 2.4,
             "req_font": 1.5,
@@ -89,7 +89,7 @@ def generate_declarations(p):
         {
             "field_name": "country_of_origin",
             "display_name": "Country of Origin",
-            "rule": "Rule 6(1)(h)",
+            "rule": "Rule 6(1)(aa)",
             "val": "Country of Origin: India",
             "font": 2.2,
             "req_font": 1.5,
@@ -97,8 +97,8 @@ def generate_declarations(p):
         },
     ]
 
-    is_placement_review = status == "REVIEW" and "Rule 6(2)" in p.get("citation", "")
-    is_font_violation = "Schedule II" in p.get("citation", "")
+    is_placement_review = status == "REVIEW" and "Rule 8(1)" in p.get("citation", "")
+    is_font_violation = "Rule 7(2)" in p.get("citation", "")
 
     decls = []
     for f in fields:
@@ -188,7 +188,7 @@ def seed_database():
             "brand": "Sunfeast",
             "product_name": "Dark Fantasy Bourbon Cookies",
             "status": "REVIEW",
-            "citation": "Rule 6(2)",
+            "citation": "Rule 8(1)",
             "details": "Placement Review: Mandatory declarations fragmented across box folds",
             "mrp": "₹142.00",
             "net_qty": "450g",
@@ -232,7 +232,7 @@ def seed_database():
             "brand": "Samrat",
             "product_name": "Khaman Dhokla Instant Mix",
             "status": "VIOLATION",
-            "citation": "Rule 6(1)(a)",
+            "citation": "Rule 6(1)(c)",
             "details": "Net Quantity omitted on Principal Display Panel",
             "mrp": "₹65.00",
             "net_qty": None,
@@ -274,8 +274,8 @@ def seed_database():
             "brand": "Ram Bandhu",
             "product_name": "Chakali Bhajani Mix",
             "status": "VIOLATION",
-            "citation": "Schedule II",
-            "details": "Font height non-compliance under Schedule II relative to PDP",
+            "citation": "Rule 7(2)",
+            "details": "Font height non-compliance under Rule 7(2) relative to PDP",
             "mrp": "₹55.00",
             "net_qty": "200g",
             "usp": "₹0.28/g",
@@ -290,7 +290,7 @@ def seed_database():
             "brand": "Pond's",
             "product_name": "Dreamflower Pink Lily Body Talc",
             "status": "REVIEW",
-            "citation": "Rule 6(2)",
+            "citation": "Rule 8(1)",
             "details": "Geometry Review: Curvature causes optical character distortion",
             "mrp": "₹140.00",
             "net_qty": "300g",
@@ -456,7 +456,7 @@ def seed_database():
             "brand": "Beverage Brand",
             "product_name": "Fruit Drink Pouch",
             "status": "REVIEW",
-            "citation": "Rule 6(2)",
+            "citation": "Rule 8(1)",
             "details": "Geometry Review: Extreme camera perspective angle requires confirmation",
             "mrp": "₹20.00",
             "net_qty": "200ml",
@@ -498,7 +498,7 @@ def seed_database():
             "brand": "Balaji Wafers",
             "product_name": "Mung Dal Savouries",
             "status": "VIOLATION",
-            "citation": "Rule 6(1)(a)",
+            "citation": "Rule 6(1)(c)",
             "details": "Net Quantity omitted on Principal Display Panel",
             "mrp": "₹5.00",
             "net_qty": None,

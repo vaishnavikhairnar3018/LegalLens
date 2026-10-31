@@ -55,6 +55,7 @@ async def list_inspections(
             "id": insp.id,
             "officer_id": insp.officer_id,
             "image_filename": insp.image_filename,
+            "product_name": insp.product_name,
             "image_hash_sha256": insp.image_hash_sha256,
             "overall_compliant": insp.overall_compliant,
             "total_fields": insp.total_fields,
@@ -100,6 +101,7 @@ async def get_inspection_detail(
         "id": insp.id,
         "officer_id": insp.officer_id,
         "image_filename": insp.image_filename,
+        "product_name": insp.product_name,
         "image_hash_sha256": insp.image_hash_sha256,
         "overall_compliant": insp.overall_compliant,
         "total_fields": insp.total_fields,
@@ -108,8 +110,14 @@ async def get_inspection_detail(
         "summary": insp.summary,
         "dpi_used": insp.dpi_used,
         "declarations": json.loads(insp.declarations_json),
+        "photos": _photos(insp),
         "created_at": insp.created_at.isoformat(),
     }
+
+
+def _photos(insp: Inspection) -> list:
+    """Every photo of a product inspection with its evidence hash ([] for single-photo scans)."""
+    return json.loads(insp.evidence_json) if insp.evidence_json else []
 
 
 @router.get("/{inspection_id}/notice.pdf")
@@ -154,6 +162,8 @@ async def download_inspection_notice(
         non_compliant_fields=insp.non_compliant_fields,
         summary=insp.summary,
         declarations=declarations,
+        photos=_photos(insp),
+        product_name=insp.product_name,
     )
 
     filename = (
@@ -213,6 +223,8 @@ async def download_inspection_notice_docx(
         non_compliant_fields=insp.non_compliant_fields,
         summary=insp.summary,
         declarations=declarations,
+        photos=_photos(insp),
+        product_name=insp.product_name,
     )
 
     filename = (
@@ -260,6 +272,7 @@ async def export_inspection_json(
         "id": insp.id,
         "officer_id": insp.officer_id,
         "image_filename": insp.image_filename,
+        "product_name": insp.product_name,
         "image_hash_sha256": insp.image_hash_sha256,
         "overall_compliant": insp.overall_compliant,
         "total_fields": insp.total_fields,
@@ -268,6 +281,7 @@ async def export_inspection_json(
         "summary": insp.summary,
         "dpi_used": insp.dpi_used,
         "declarations": json.loads(insp.declarations_json),
+        "photos": _photos(insp),
         "created_at": insp.created_at.isoformat(),
     }
 
@@ -298,14 +312,14 @@ async def export_all_inspections_csv(
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        "Inspection ID", "Officer ID", "Image Filename", "SHA-256 Hash",
+        "Inspection ID", "Officer ID", "Product Name", "Image Filename", "SHA-256 Hash",
         "Compliant", "Total Fields", "Compliant Fields", "Non-Compliant Fields",
         "Summary", "DPI", "Created At",
     ])
 
     for insp in inspections:
         writer.writerow([
-            insp.id, insp.officer_id, insp.image_filename,
+            insp.id, insp.officer_id, insp.product_name or "", insp.image_filename,
             insp.image_hash_sha256, insp.overall_compliant,
             insp.total_fields, insp.compliant_fields,
             insp.non_compliant_fields, insp.summary,
