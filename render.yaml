@@ -1,0 +1,28 @@
+# Render blueprint: LegalLens API (FastAPI + EasyOCR) and its PostgreSQL database.
+# EasyOCR with PyTorch needs about 2 GB of memory, so the API runs on the "standard" plan;
+# smaller plans run out of memory while loading the OCR model.
+services:
+  - type: web
+    name: legallens-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    plan: standard
+    healthCheckPath: /health
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: legallens-db
+          property: connectionString
+      - key: OCR_LANGUAGES
+        value: en,hi
+      - key: ALLOWED_ORIGINS
+        value: https://legal-lens-ai.vercel.app
+      - key: MAX_UPLOAD_SIZE_MB
+        value: "10"
+
+databases:
+  - name: legallens-db
+    plan: free

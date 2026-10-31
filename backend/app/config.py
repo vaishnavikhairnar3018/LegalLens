@@ -3,6 +3,7 @@ LenseScan Backend Configuration.
 All secrets loaded from environment variables via .env file.
 """
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from typing import List
@@ -40,6 +41,15 @@ class Settings(BaseSettings):
         case_sensitive=True,
         extra="ignore",
     )
+
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def _use_async_driver(cls, url: str) -> str:
+        """Hosts like Render hand out postgres:// or postgresql:// URLs; the app's engine is async (asyncpg)."""
+        for prefix in ("postgres://", "postgresql://"):
+            if url.startswith(prefix):
+                return "postgresql+asyncpg://" + url[len(prefix):]
+        return url
 
     @property
     def allowed_origins_list(self) -> List[str]:

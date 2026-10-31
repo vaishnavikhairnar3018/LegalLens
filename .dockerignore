@@ -1,0 +1,13 @@
+**/.venv
+**/__pycache__
+**/.pytest_cache
+backend/.env
+backend/lensescan.db
+lensescan/
+public/
+Acro Scanner Photos/
+Research_Paper/
+research_paper_updated/
+*.pptx
+*.zip
+.git
